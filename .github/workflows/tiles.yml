@@ -1,0 +1,126 @@
+# Fase 2: elke zondagnacht de tegels maken en opladen naar Cloudflare R2.
+#
+# - Downloadt de gebieden uit regions.yml bij Geofabrik, maakt de tegels (build_tiles.py) en laadt
+#   alleen de gewijzigde tegels op (rclone vergelijkt de MD5 van elke tegel met die in R2).
+# - Mislukt als de tegels samen groter zijn dan 8 GB (build_tiles.py --max-gb); GitHub mailt dan.
+#   De tegels in R2 blijven in dat geval ongewijzigd.
+# - Schrijft status.json terug in de repository: zo blijft de geplande run actief (GitHub zet een
+#   geplande run stil na 60 dagen zonder activiteit in de repository).
+# - Met de hand starten: Actions -> Tegels maken en opladen -> Run workflow.
+#
+# Nodige secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (zie het plan van aanpak, fase 0).
+
+name: Tegels maken en opladen
+
+on:
+  schedule:
+    # Zondag 02:00 UTC (03:00 of 04:00 in België). De cache van Cloudflare bewaart een tegel 6 uur,
+    # dus maandagochtend is de nieuwe versie overal beschikbaar.
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Tegels opladen naar R2 (uit = alleen maken, om te testen)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # status.json terugschrijven
+
+concurrency:
+  group: tiles
+  cancel-in-progress: false
+
+env:
+  BUCKET: gpxnavigation-tiles
+
+jobs:
+  tiles:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Programma's installeren
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q osmium-tool rclone
+          osmium --version | head -1
+          rclone version | head -1
+          pip install -q -r requirements.txt
+
+      - name: Test
+        run: python3 tests/test_tiles.py
+
+      - name: Gebieden downloaden
+        run: python3 scripts/fetch_regions.py
+
+      - name: Tegels maken
+        run: python3 scripts/build_tiles.py --max-gb 8
+
+      - name: Opladen naar R2
+        if: github.event_name == 'schedule' || inputs.upload
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_ACL: private
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+        run: |
+          # Tegels: alleen gewijzigde opladen (--checksum = MD5 vergelijken), verdwenen tegels wissen.
+          # Alleen onder 14/: andere bestanden in de bucket (bv. test.txt) blijven staan.
+          # application/gzip zonder Content-Encoding: de app pakt de tegel zelf uit.
+          rclone sync out/14 "r2:$BUCKET/14" --checksum --fast-list \
+            --transfers 32 --checkers 32 \
+            --header-upload "Content-Type: application/gzip" \
+            --header-upload "Cache-Control: public, max-age=3600" \
+            --stats 60s --stats-one-line --stats-log-level NOTICE
+          # Overzichtsbestanden: altijd opnieuw (klein).
+          for f in out/regions.json out/status.json ATTRIBUTION.txt; do
+            rclone copyto "$f" "r2:$BUCKET/$(basename "$f")" \
+              --header-upload "Cache-Control: public, max-age=3600"
+          done
+
+      - name: Controle via het publieke adres
+        if: github.event_name == 'schedule' || inputs.upload
+        run: |
+          # Eén echte tegel (de grootste) en regions.json moeten bereikbaar zijn.
+          tile=$(python3 -c "import json;print(json.load(open('out/status.json'))['largest_tiles'][0]['tile'])")
+          for path in "$tile" regions.json; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "https://tiles.data-tech-up.com/$path?run=$GITHUB_RUN_ID")
+            echo "$path: HTTP $code"
+            test "$code" = "200"
+          done
+
+      - name: status.json terugschrijven
+        if: github.event_name == 'schedule' || inputs.upload
+        run: |
+          cp out/status.json status.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add status.json
+          git commit -q -m "Tegels bijgewerkt: $(python3 -c "import json;s=json.load(open('status.json'));print(f\"{s['tiles']} tegels, {s['bytes_total']/1e6:.0f} MB\")")" || exit 0
+          git push
+
+      - name: Samenvatting
+        if: always()
+        run: |
+          test -f out/status.json || exit 0
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          s = json.load(open("out/status.json"))
+          print("## Tegels")
+          print(f"- Gebieden: {', '.join(s['regions'])}")
+          print(f"- Tegels: {s['tiles']} ({s['tiles_complete']} volledig, {s['tiles_empty']} leeg)")
+          print(f"- Wegen: {s['ways']}, oversteekknopen: {s['crossing_nodes']}")
+          print(f"- Grootte: {s['bytes_total'] / 1e6:.1f} MB, mediaan {s['bytes_median'] / 1000:.1f} kB, "
+                f"grootste {s['bytes_max'] / 1000:.1f} kB")
+          print(f"- Duur van het maken: {s['duration_seconds']} s")
+          EOF
