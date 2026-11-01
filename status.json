@@ -1,0 +1,69 @@
+{
+  "generated": "2026-11-01T15:15:08+00:00",
+  "duration_seconds": 227,
+  "regions": [
+    "belgium"
+  ],
+  "tiles": 14401,
+  "tiles_complete": 13190,
+  "tiles_empty": 848,
+  "ways": 1508247,
+  "crossing_nodes": 122426,
+  "ways_skipped_incomplete": 0,
+  "bytes_total": 165065798,
+  "bytes_median": 8080,
+  "bytes_p95": 31879,
+  "bytes_max": 277086,
+  "largest_tiles": [
+    {
+      "tile": "14/8390/5495.json.gz",
+      "bytes": 277086,
+      "elements": 5541
+    },
+    {
+      "tile": "14/8390/5496.json.gz",
+      "bytes": 276664,
+      "elements": 5379
+    },
+    {
+      "tile": "14/8391/5496.json.gz",
+      "bytes": 207143,
+      "elements": 4291
+    },
+    {
+      "tile": "14/8389/5495.json.gz",
+      "bytes": 200825,
+      "elements": 3862
+    },
+    {
+      "tile": "14/8442/5514.json.gz",
+      "bytes": 195065,
+      "elements": 1485
+    },
+    {
+      "tile": "14/8389/5493.json.gz",
+      "bytes": 194128,
+      "elements": 3483
+    },
+    {
+      "tile": "14/8389/5496.json.gz",
+      "bytes": 187414,
+      "elements": 3720
+    },
+    {
+      "tile": "14/8405/5493.json.gz",
+      "bytes": 182066,
+      "elements": 2653
+    },
+    {
+      "tile": "14/8394/5495.json.gz",
+      "bytes": 181876,
+      "elements": 2748
+    },
+    {
+      "tile": "14/8393/5498.json.gz",
+      "bytes": 176426,
+      "elements": 3334
+    }
+  ]
+}
