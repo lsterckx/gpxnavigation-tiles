@@ -39,9 +39,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -68,12 +68,21 @@ jobs:
         env:
           RCLONE_CONFIG_R2_TYPE: s3
           RCLONE_CONFIG_R2_PROVIDER: Cloudflare
-          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           RCLONE_CONFIG_R2_ACL: private
           RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
         run: |
+          # Spaties en regeleinden rond de secrets weghalen (komen makkelijk mee bij het plakken).
+          trim() { printf '%s' "$1" | tr -d '[:space:]'; }
+          for v in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
+            test -n "$(trim "${!v}")" || { echo "::error::Secret $v ontbreekt of is leeg"; exit 1; }
+          done
+          export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$(trim "$R2_ACCESS_KEY_ID")"
+          export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$(trim "$R2_SECRET_ACCESS_KEY")"
+          export RCLONE_CONFIG_R2_ENDPOINT="https://$(trim "$R2_ACCOUNT_ID").r2.cloudflarestorage.com"
+
           # Tegels: alleen gewijzigde opladen (--checksum = MD5 vergelijken), verdwenen tegels wissen.
           # Alleen onder 14/: andere bestanden in de bucket (bv. test.txt) blijven staan.
           # application/gzip zonder Content-Encoding: de app pakt de tegel zelf uit.
