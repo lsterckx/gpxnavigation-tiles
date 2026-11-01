@@ -1,0 +1,17 @@
+# Gedownloade en gemaakte gegevens
+data/
+out/
+*.osm.pbf
+*.poly
+
+# Persoonlijke gegevens horen niet in deze openbare repository
+*.gpx
+routes/
+gpx-test/
+navlog*
+overpass*.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,9 @@
+De tegels in deze dienst bevatten gegevens van OpenStreetMap.
+
+© OpenStreetMap-bijdragers
+Beschikbaar onder de Open Database License (ODbL) 1.0:
+https://opendatacommons.org/licenses/odbl/1-0/
+https://www.openstreetmap.org/copyright
+
+De tegels zijn een afgeleide databank en vallen eveneens onder de ODbL.
+Bron van de bestanden: Geofabrik GmbH, https://download.geofabrik.de

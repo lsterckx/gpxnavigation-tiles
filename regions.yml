@@ -1,0 +1,34 @@
+# Gebieden waarvoor tegels gemaakt worden.
+#   id         korte naam; ook de bestandsnaam in data/ (data/<id>.osm.pbf en data/<id>.poly)
+#   name       naam zoals de app hem toont
+#   geofabrik  pad bij https://download.geofabrik.de (zonder -latest.osm.pbf)
+#   enabled    false = (nog) niet verwerken
+#
+# Een gebied toevoegen = hier een regel bijzetten. Alle gebieden samen worden in een keer verwerkt,
+# zodat een tegel op de grens van twee gebieden de wegen van beide bevat.
+
+regions:
+  - id: belgium
+    name: België
+    geofabrik: europe/belgium
+    enabled: true
+
+  # De Eifel (fase 5)
+  - id: rheinland-pfalz
+    name: Rheinland-Pfalz
+    geofabrik: europe/germany/rheinland-pfalz
+    enabled: false
+  - id: koeln-regbez
+    name: Regierungsbezirk Köln
+    geofabrik: europe/germany/nordrhein-westfalen/koeln-regbez
+    enabled: false
+
+  # Voor het voorjaar van 2027 (fase 5)
+  - id: spain
+    name: Spanje
+    geofabrik: europe/spain
+    enabled: false
+  - id: portugal
+    name: Portugal
+    geofabrik: europe/portugal
+    enabled: false
