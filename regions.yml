@@ -25,18 +25,18 @@ regions:
   - id: rheinland-pfalz
     name: Rheinland-Pfalz
     geofabrik: europe/germany/rheinland-pfalz
-    enabled: false
+    enabled: true
   - id: koeln-regbez
     name: Regierungsbezirk Köln
     geofabrik: europe/germany/nordrhein-westfalen/koeln-regbez
-    enabled: false
+    enabled: true
 
   # Voor het voorjaar van 2027 (fase 5)
   - id: spain
     name: Spanje
     geofabrik: europe/spain
-    enabled: false
+    enabled: true
   - id: portugal
     name: Portugal
     geofabrik: europe/portugal
-    enabled: false
+    enabled: true

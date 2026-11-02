@@ -37,7 +37,7 @@ env:
 jobs:
   tiles:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 300   # GitHub staat maximaal 360 toe
     steps:
       - uses: actions/checkout@v5
 
