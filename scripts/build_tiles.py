@@ -15,7 +15,8 @@ Per tegel (zoom 14) een gzip-JSON in hetzelfde formaat als een antwoord van Over
   Frankrijk) ontbreken wegen van over de grens: dan false, en gebruikt de app Overpass.
 
 Er komt een tegel voor elk vak dat de gebieden raakt, ook als er geen weg in ligt (dan is
-"elements" leeg). Een tegel die niet bestaat (404) betekent dus: buiten de gebieden.
+"elements" leeg), maar alleen naast een tegel met wegen. Een tegel die niet bestaat (404) betekent dus:
+buiten de gebieden, of ver van elke weg (zee).
 
 De tegels bevatten geen datum, zodat een tegel waar niets in veranderde byte voor byte gelijk
 blijft en bij het opladen overgeslagen wordt. De datum van de gegevens staat in regions.json.
@@ -199,7 +200,12 @@ def write_tiles(out_dir: str, collector: Collector, touching: set, inside: set) 
     tiles_dir = os.path.join(out_dir, str(ZOOM))
     if os.path.isdir(tiles_dir):
         shutil.rmtree(tiles_dir)
-    all_cells = touching | set(collector.tile_ways) | set(collector.tile_nodes)
+    filled = set(collector.tile_ways) | set(collector.tile_nodes)
+    # Een lege tegel alleen naast een tegel met wegen: de app vraagt alleen tegels op langs een route of rond
+    # je plaats, en die liggen altijd op of naast een tegel met wegen. Zo vallen de honderdduizenden lege
+    # tegels op zee binnen de omtrek van Geofabrik weg (Azoren, Canarische Eilanden, Waddenzee).
+    near = {(x + dx, y + dy) for (x, y) in filled for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+    all_cells = filled | (touching & near)
     written = []
     for (x, y) in sorted(all_cells):
         node_ids = sorted(set(collector.tile_nodes.get((x, y), ())))

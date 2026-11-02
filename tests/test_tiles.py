@@ -113,8 +113,11 @@ def test_build() -> None:
         check((x2, y2) != (x, y), "het einde van de straat ligt in een andere tegel")
         check(any(e["id"] == 100 for e in load(out, x2, y2)["elements"]), "straat ook volledig in de buurtegel")
 
-        x3, y3 = lonlat_to_tile(base_lon + 0.049, base_lat + 0.049)
+        x3, y3 = lonlat_to_tile(base_lon + 0.045, base_lat)
         check(load(out, x3, y3)["complete"] is False, "tegel op de rand van het gebied is niet volledig")
+        check(load(out, x, y - 1)["elements"] == [], "lege tegel naast een tegel met wegen bestaat")
+        x4, y4 = lonlat_to_tile(base_lon + 0.049, base_lat + 0.049)
+        check(not os.path.exists(os.path.join(out, tile_path(x4, y4))), "geen lege tegel ver van elke weg")
         check(not os.path.exists(os.path.join(out, tile_path(x + 10, y))), "geen tegel buiten het gebied")
 
         status = json.load(open(os.path.join(out, "status.json")))

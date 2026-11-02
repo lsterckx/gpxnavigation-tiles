@@ -19,7 +19,8 @@ Gegevens © OpenStreetMap-bijdragers, beschikbaar onder de Open Database License
 
 Een tegel heeft `"complete": true` als hij volledig binnen de gebieden ligt. Aan een gebiedsrand
 (`false`) ontbreken wegen van over de grens; daar gebruikt de app nog Overpass. Een tegel die niet
-bestaat (404) ligt buiten de gebieden.
+bestaat (404) ligt buiten de gebieden, of ver van elke weg (op zee): lege tegels worden alleen gemaakt
+naast een tegel met wegen.
 
 ## Op de Mac proberen (fase 1)
 
