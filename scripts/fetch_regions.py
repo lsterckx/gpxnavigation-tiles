@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import os
 import sys
 import time
@@ -21,6 +22,19 @@ import yaml
 
 BASE = "https://download.geofabrik.de"
 USER_AGENT = "gpxnavigation-tiles (https://github.com/lsterckx/gpxnavigation-tiles)"
+
+
+def retry(what: str, action, attempts: int = 3):
+    """Voert `action` uit; mislukt ze (time-out of verbroken verbinding bij Geofabrik), dan na 30 en 60 s opnieuw."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return action()
+        except (OSError, http.client.HTTPException) as e:
+            if attempt == attempts:
+                raise
+            wait = 30 * attempt
+            print(f"    {what}: {e} - opnieuw over {wait} s (poging {attempt + 1}/{attempts})", flush=True)
+            time.sleep(wait)
 
 
 def get(url: str) -> bytes:
@@ -75,18 +89,18 @@ def main():
         poly = os.path.join(args.data, f"{r['id']}.poly")
         print(f"{r['name']} ({src})")
 
-        expected = get(f"{BASE}/{src}-latest.osm.pbf.md5").decode().split()[0]
+        expected = retry("controlesom", lambda: get(f"{BASE}/{src}-latest.osm.pbf.md5")).decode().split()[0]
         if os.path.exists(pbf) and md5(pbf) == expected:
             print("  .osm.pbf is al de nieuwste versie")
         else:
             print("  .osm.pbf downloaden")
-            download(f"{BASE}/{src}-latest.osm.pbf", pbf)
+            retry("download", lambda: download(f"{BASE}/{src}-latest.osm.pbf", pbf))
             if md5(pbf) != expected:
                 os.remove(pbf)
                 sys.exit(f"  FOUT: controlesom klopt niet voor {pbf}")
 
         with open(poly, "wb") as f:
-            f.write(get(f"{BASE}/{src}.poly"))
+            f.write(retry("omtrek", lambda: get(f"{BASE}/{src}.poly")))
 
 
 if __name__ == "__main__":
