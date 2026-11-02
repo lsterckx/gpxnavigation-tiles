@@ -33,8 +33,9 @@ concurrency:
 
 env:
   BUCKET: gpxnavigation-tiles
-  RCLONE_VERSION: v1.71.2
-  RCLONE_SHA256: 68c961e4aa1bbdf10d3264ec87eb649934f9c75c85c109c72ac43cf6a5fe9c90
+  # Geen naam die met RCLONE_ begint: rclone leest die zelf als optie (RCLONE_VERSION = --version).
+  RCLONE_DEB_VERSION: v1.71.2
+  RCLONE_DEB_SHA256: 68c961e4aa1bbdf10d3264ec87eb649934f9c75c85c109c72ac43cf6a5fe9c90
 
 jobs:
   tiles:
@@ -54,8 +55,8 @@ jobs:
           sudo apt-get install -y -q osmium-tool
           # rclone: vaste versie van rclone.org, nagekeken met de controlesom. De versie uit Ubuntu (1.60)
           # kreeg bij R2 voor elke nieuwe tegel een fout 501 en probeerde ze tot 10 keer opnieuw.
-          curl -sSfL -o /tmp/rclone.deb "https://downloads.rclone.org/$RCLONE_VERSION/rclone-$RCLONE_VERSION-linux-amd64.deb"
-          echo "$RCLONE_SHA256  /tmp/rclone.deb" | sha256sum -c -
+          curl -sSfL -o /tmp/rclone.deb "https://downloads.rclone.org/$RCLONE_DEB_VERSION/rclone-$RCLONE_DEB_VERSION-linux-amd64.deb"
+          echo "$RCLONE_DEB_SHA256  /tmp/rclone.deb" | sha256sum -c -
           sudo dpkg -i /tmp/rclone.deb
           osmium --version | head -1
           rclone version | head -1
