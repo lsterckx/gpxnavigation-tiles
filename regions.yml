@@ -12,6 +12,14 @@ regions:
     name: België
     geofabrik: europe/belgium
     enabled: true
+  - id: netherlands
+    name: Nederland
+    geofabrik: europe/netherlands
+    enabled: true
+  - id: luxembourg
+    name: Luxemburg
+    geofabrik: europe/luxembourg
+    enabled: true
 
   # De Eifel (fase 5)
   - id: rheinland-pfalz
