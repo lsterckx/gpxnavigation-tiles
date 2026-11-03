@@ -68,6 +68,13 @@ deelgemeenten en steden liggen in de buurt. Uit hetzelfde Geofabrik-bestand: gre
 (`place=city/town/village` met vertalingen en inwonersaantal). De werkstroom maakt ze na de tegels en laadt ze op
 onder `areas/`. Test: `python3 tests/test_areas.py`.
 
+## Water (waterlopen en watervlakken)
+
+`scripts/build_water.py` maakt een aparte laag tegels `out/water/14/{x}/{y}.json.gz` (zelfde raster, alleen tegels
+met water) voor *Extra → Water* in de app: waterlopen (`waterway=river/stream/canal/ditch/drain/tidal_channel`, met
+en zonder naam, in de stroomrichting) en watervlakken (`natural=water`, `landuse=reservoir/basin`; geen
+rivierbeddingen, geen zwembaden, geen naamloze vlakken onder 200 m²). Test: `python3 tests/test_water.py`.
+
 ## Een gebied toevoegen
 
 Een regel bijzetten in `regions.yml` (of `enabled: true` zetten). Alle gebieden worden samen

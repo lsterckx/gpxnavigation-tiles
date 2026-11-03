@@ -66,6 +66,7 @@ jobs:
         run: |
           python3 tests/test_tiles.py
           python3 tests/test_areas.py
+          python3 tests/test_water.py
 
       - name: Gebieden downloaden
         run: python3 scripts/fetch_regions.py
@@ -75,6 +76,9 @@ jobs:
 
       - name: Omgevingsgegevens maken (gemeenten, deelgemeenten, plaatsen)
         run: python3 scripts/build_areas.py
+
+      - name: Water maken (waterlopen en watervlakken, aparte laag tegels)
+        run: python3 scripts/build_water.py
 
       - name: Opladen naar R2
         if: github.event_name == 'schedule' || inputs.upload
@@ -100,6 +104,12 @@ jobs:
           # Alleen onder 14/: andere bestanden in de bucket (bv. test.txt) blijven staan.
           # application/gzip zonder Content-Encoding: de app pakt de tegel zelf uit.
           rclone sync out/14 "r2:$BUCKET/14" --checksum --fast-list \
+            --transfers 32 --checkers 32 --low-level-retries 3 \
+            --header-upload "Content-Type: application/gzip" \
+            --header-upload "Cache-Control: public, max-age=3600" \
+            --stats 60s --stats-one-line --stats-log-level NOTICE
+          # Water: aparte laag tegels onder water/14/ (alleen gewijzigde, verdwenen wissen).
+          rclone sync out/water/14 "r2:$BUCKET/water/14" --checksum --fast-list \
             --transfers 32 --checkers 32 --low-level-retries 3 \
             --header-upload "Content-Type: application/gzip" \
             --header-upload "Cache-Control: public, max-age=3600" \
@@ -159,4 +169,9 @@ jobs:
                   c = r["counts"]
                   print(f"- {r['name']}: {c['municipalities']} gemeenten, {c['sections']} deelgemeenten, "
                         f"{c['places']} plaatsen, {r['bytes'] / 1000:.0f} kB")
+          if os.path.exists("out/water/status.json"):
+              w = json.load(open("out/water/status.json"))
+              print("## Water")
+              print(f"- {w['tiles']} tegels, {w['bytes_total'] / 1e6:.1f} MB, {w['waterways']} waterlopen, "
+                    f"{w['water']} watervlakken, {w['duration_seconds']} s")
           EOF
