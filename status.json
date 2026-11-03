@@ -1,24 +1,27 @@
 {
-  "generated": "2026-11-02T20:07:43+00:00",
-  "duration_seconds": 2731,
+  "generated": "2026-11-03T13:36:41+00:00",
+  "duration_seconds": 1514,
   "regions": [
     "belgium",
-    "netherlands",
     "luxembourg",
     "rheinland-pfalz",
     "koeln-regbez",
     "spain",
-    "portugal"
+    "portugal",
+    "nord-pas-de-calais",
+    "picardie",
+    "champagne-ardenne",
+    "lorraine"
   ],
-  "tiles": 219639,
-  "tiles_complete": 217277,
-  "tiles_empty": 7563,
-  "ways": 13499640,
-  "crossing_nodes": 994210,
+  "tiles": 234832,
+  "tiles_complete": 231704,
+  "tiles_empty": 6585,
+  "ways": 12149773,
+  "crossing_nodes": 1128761,
   "ways_skipped_incomplete": 0,
-  "bytes_total": 2546924175,
-  "bytes_median": 7917,
-  "bytes_p95": 32820,
+  "bytes_total": 2531263351,
+  "bytes_median": 7343,
+  "bytes_p95": 30128,
   "bytes_max": 408265,
   "largest_tiles": [
     {
@@ -43,13 +46,13 @@
     },
     {
       "tile": "14/8024/6060.json.gz",
-      "bytes": 328517,
-      "elements": 5561
+      "bytes": 328562,
+      "elements": 5562
     },
     {
       "tile": "14/8291/6118.json.gz",
-      "bytes": 324862,
-      "elements": 6697
+      "bytes": 324951,
+      "elements": 6700
     },
     {
       "tile": "14/7933/6144.json.gz",
@@ -58,8 +61,8 @@
     },
     {
       "tile": "14/8151/6103.json.gz",
-      "bytes": 314885,
-      "elements": 5944
+      "bytes": 315283,
+      "elements": 5958
     },
     {
       "tile": "14/8289/6119.json.gz",
