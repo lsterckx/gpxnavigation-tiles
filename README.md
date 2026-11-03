@@ -58,6 +58,16 @@ De werkstroom **Tegels maken en opladen** draait elke zondag om 02:00 UTC, en me
 Nodige secrets: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. Mislukt een run, dan mailt
 GitHub en blijven de vorige tegels in R2 gewoon werken.
 
+## Omgevingsgegevens (gemeenten, deelgemeenten, plaatsen)
+
+`scripts/build_areas.py` maakt per gebied `out/areas/<gebied>.json.gz` en `out/areas/index.json`, voor
+*Extra → Omgeving* in de app: in welke (deel)gemeente ligt een punt, welke gemeenten grenzen eraan, welke
+deelgemeenten en steden liggen in de buurt. Uit hetzelfde Geofabrik-bestand: grenzen met
+`boundary=administrative` op `municipality_level` (standaard 8) en `section_level` (standaard 9; per gebied in
+`regions.yml`, bv. Portugal 7 en 8), vereenvoudigd tot ±40 m, buren (grenzen die elkaar raken), en plaatsen
+(`place=city/town/village` met vertalingen en inwonersaantal). De werkstroom maakt ze na de tegels en laadt ze op
+onder `areas/`. Test: `python3 tests/test_areas.py`.
+
 ## Een gebied toevoegen
 
 Een regel bijzetten in `regions.yml` (of `enabled: true` zetten). Alle gebieden worden samen

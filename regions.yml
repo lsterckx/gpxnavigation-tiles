@@ -3,6 +3,8 @@
 #   name       naam zoals de app hem toont
 #   geofabrik  pad bij https://download.geofabrik.de (zonder -latest.osm.pbf)
 #   enabled    false = (nog) niet verwerken
+#   municipality_level  admin_level van een gemeente (standaard 8)     } voor "Omgeving" in de app
+#   section_level       admin_level van een deelgemeente (standaard 9) } (build_areas.py); geen = leeg laten
 #
 # Een gebied toevoegen = hier een regel bijzetten. Alle gebieden samen worden in een keer verwerkt,
 # zodat een tegel op de grens van twee gebieden de wegen van beide bevat.
@@ -41,6 +43,8 @@ regions:
     name: Portugal
     geofabrik: europe/portugal
     enabled: true
+    municipality_level: 7   # concelho
+    section_level: 8        # freguesia
 
   # Frankrijk: alleen de regio's tegen België en Luxemburg (heel Frankrijk past niet in één run).
   # Geofabrik gebruikt nog de oude regio's van voor 2016.

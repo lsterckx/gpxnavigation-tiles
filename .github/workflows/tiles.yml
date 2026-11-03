@@ -63,13 +63,18 @@ jobs:
           pip install -q -r requirements.txt
 
       - name: Test
-        run: python3 tests/test_tiles.py
+        run: |
+          python3 tests/test_tiles.py
+          python3 tests/test_areas.py
 
       - name: Gebieden downloaden
         run: python3 scripts/fetch_regions.py
 
       - name: Tegels maken
         run: python3 scripts/build_tiles.py --max-gb 8
+
+      - name: Omgevingsgegevens maken (gemeenten, deelgemeenten, plaatsen)
+        run: python3 scripts/build_areas.py
 
       - name: Opladen naar R2
         if: github.event_name == 'schedule' || inputs.upload
@@ -99,6 +104,13 @@ jobs:
             --header-upload "Content-Type: application/gzip" \
             --header-upload "Cache-Control: public, max-age=3600" \
             --stats 60s --stats-one-line --stats-log-level NOTICE
+          # Omgevingsgegevens per gebied (klein): gemeenten, deelgemeenten, plaatsen.
+          rclone sync out/areas "r2:$BUCKET/areas" --checksum --exclude index.json \
+            --header-upload "Content-Type: application/gzip" \
+            --header-upload "Cache-Control: public, max-age=3600"
+          rclone copyto out/areas/index.json "r2:$BUCKET/areas/index.json" \
+            --header-upload "Content-Type: application/json" \
+            --header-upload "Cache-Control: public, max-age=3600"
           # Overzichtsbestanden: altijd opnieuw (klein).
           for f in out/regions.json out/status.json ATTRIBUTION.txt; do
             rclone copyto "$f" "r2:$BUCKET/$(basename "$f")" \
@@ -110,7 +122,7 @@ jobs:
         run: |
           # Eén echte tegel (de grootste) en regions.json moeten bereikbaar zijn.
           tile=$(python3 -c "import json;print(json.load(open('out/status.json'))['largest_tiles'][0]['tile'])")
-          for path in "$tile" regions.json; do
+          for path in "$tile" regions.json areas/index.json; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "https://tiles.data-tech-up.com/$path?run=$GITHUB_RUN_ID")
             echo "$path: HTTP $code"
             test "$code" = "200"
@@ -140,4 +152,11 @@ jobs:
           print(f"- Grootte: {s['bytes_total'] / 1e6:.1f} MB, mediaan {s['bytes_median'] / 1000:.1f} kB, "
                 f"grootste {s['bytes_max'] / 1000:.1f} kB")
           print(f"- Duur van het maken: {s['duration_seconds']} s")
+          import os
+          if os.path.exists("out/areas/index.json"):
+              print("## Omgevingsgegevens")
+              for r in json.load(open("out/areas/index.json"))["regions"]:
+                  c = r["counts"]
+                  print(f"- {r['name']}: {c['municipalities']} gemeenten, {c['sections']} deelgemeenten, "
+                        f"{c['places']} plaatsen, {r['bytes'] / 1000:.0f} kB")
           EOF

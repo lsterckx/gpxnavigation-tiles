@@ -10,3 +10,5 @@ een navigatie-app voor blinde wandelaars. Communicatie, commentaar in code en do
   gesorteerde elementen, gzip met mtime=0): zo worden alleen gewijzigde tegels opgeladen.
 - Na een wijziging: `python3 tests/test_tiles.py` moet slagen.
 - Het plan van aanpak: https://claude.ai/artifact/NTzvGRCj3734PmXvqYV7rZ
+- Het formaat van `areas/<gebied>.json.gz` (build_areas.py, `FORMAT_VERSION`) is ook een afspraak met de app
+  (AreaInfoStore.swift). Na een wijziging: `python3 tests/test_areas.py` moet slagen.
