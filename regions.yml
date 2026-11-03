@@ -12,10 +12,11 @@ regions:
     name: België
     geofabrik: europe/belgium
     enabled: true
+  # Nederland: voorlopig niet (03/11/2026), om ruimte te houden voor Frankrijk en Oostenrijk.
   - id: netherlands
     name: Nederland
     geofabrik: europe/netherlands
-    enabled: true
+    enabled: false
   - id: luxembourg
     name: Luxemburg
     geofabrik: europe/luxembourg
@@ -40,3 +41,28 @@ regions:
     name: Portugal
     geofabrik: europe/portugal
     enabled: true
+
+  # Frankrijk: alleen de regio's tegen België en Luxemburg (heel Frankrijk past niet in één run).
+  # Geofabrik gebruikt nog de oude regio's van voor 2016.
+  - id: nord-pas-de-calais
+    name: Nord-Pas-de-Calais
+    geofabrik: europe/france/nord-pas-de-calais
+    enabled: true
+  - id: picardie
+    name: Picardie
+    geofabrik: europe/france/picardie
+    enabled: true
+  - id: champagne-ardenne
+    name: Champagne-Ardenne
+    geofabrik: europe/france/champagne-ardenne
+    enabled: true
+  - id: lorraine
+    name: Lorraine
+    geofabrik: europe/france/lorraine
+    enabled: true
+
+  # Oostenrijk (ongeveer 0,8 GB): klaar om aan te zetten.
+  - id: austria
+    name: Oostenrijk
+    geofabrik: europe/austria
+    enabled: false

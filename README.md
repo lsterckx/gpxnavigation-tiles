@@ -31,7 +31,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 python3 tests/test_tiles.py         # test zonder internet
-python3 scripts/fetch_regions.py    # België, Nederland en Luxemburg, ongeveer 2 GB
+python3 scripts/fetch_regions.py    # de gebieden met enabled: true in regions.yml (enkele GB)
 python3 scripts/build_tiles.py      # tegels in out/
 ```
 
