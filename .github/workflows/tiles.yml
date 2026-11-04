@@ -1,11 +1,20 @@
-# Fase 2: elke zondagnacht de tegels maken en opladen naar Cloudflare R2.
+# Elke maand de tegels maken en opladen naar Cloudflare R2, in een gesplitste run:
 #
-# - Downloadt de gebieden uit regions.yml bij Geofabrik, maakt de tegels (build_tiles.py) en laadt
-#   alleen de gewijzigde tegels op (rclone vergelijkt de MD5 van elke tegel met die in R2).
-# - Mislukt als de tegels samen groter zijn dan 8 GB (build_tiles.py --max-gb); GitHub mailt dan.
-#   De tegels in R2 blijven in dat geval ongewijzigd.
-# - Schrijft status.json terug in de repository: zo blijft de geplande run actief (GitHub zet een
-#   geplande run stil na 60 dagen zonder activiteit in de repository).
+#   plan   -> welke gebieden (enabled in regions.yml), tests
+#   part   -> één job per gebied, tegelijk: downloaden bij Geofabrik, wegtegels, watertegels, omgevingsgegevens.
+#             De eigen tegels (ver van elk ander gebied) worden meteen opgeladen; de randtegels gaan als artefact
+#             naar merge (zie scripts/parts_common.py).
+#   merge  -> randtegels samenvoegen en opladen (scripts/merge_parts.py), verdwenen tegels wissen, overzichts-
+#             bestanden, controle via het publieke adres, status.json terugschrijven.
+#
+# - Een tegel waar niets in veranderde, blijft byte voor byte gelijk en wordt niet opnieuw opgeladen (rclone
+#   vergelijkt de MD5).
+# - Mislukt een gebied, dan worden de eigen tegels van de andere gebieden wel bijgewerkt, maar de randtegels en de
+#   overzichtsbestanden niet (merge draait dan niet); GitHub mailt. Wat in R2 staat, blijft bruikbaar.
+# - merge mislukt als de marge rond de gebieden te klein was (verhoog border_margin_degrees in regions.yml) of als
+#   alle tegels samen groter zijn dan 8 GB.
+# - status.json in de repository houdt de geplande run actief (GitHub zet die anders stil na 60 dagen zonder
+#   activiteit).
 # - Met de hand starten: Actions -> Tegels maken en opladen -> Run workflow.
 #
 # Nodige secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (zie het plan van aanpak, fase 0).
@@ -14,15 +23,19 @@ name: Tegels maken en opladen
 
 on:
   schedule:
-    # Zondag 02:00 UTC (03:00 of 04:00 in België). De cache van Cloudflare bewaart een tegel 6 uur,
-    # dus maandagochtend is de nieuwe versie overal beschikbaar.
-    - cron: "0 2 * * 0"
+    # De 1e van elke maand om 02:00 UTC (03:00 of 04:00 in België). De cache van Cloudflare bewaart een tegel
+    # 1 uur, dus een paar uur na de run is de nieuwe versie overal beschikbaar.
+    - cron: "0 2 1 * *"
   workflow_dispatch:
     inputs:
       upload:
         description: "Tegels opladen naar R2 (uit = alleen maken, om te testen)"
         type: boolean
         default: true
+      allow_many_deletes:
+        description: "Meer dan 5% van de tegels in R2 mag gewist worden (bv. na het uitzetten van een gebied)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # status.json terugschrijven
@@ -36,84 +49,135 @@ env:
   # Geen naam die met RCLONE_ begint: rclone leest die zelf als optie (RCLONE_VERSION = --version).
   RCLONE_DEB_VERSION: v1.71.2
   RCLONE_DEB_SHA256: 68c961e4aa1bbdf10d3264ec87eb649934f9c75c85c109c72ac43cf6a5fe9c90
+  UPLOAD: ${{ github.event_name == 'schedule' || inputs.upload }}
 
 jobs:
-  tiles:
+  plan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 300   # GitHub staat maximaal 360 toe
+    timeout-minutes: 15
+    outputs:
+      regions: ${{ steps.regions.outputs.regions }}
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-python@v6
+      - uses: ./.github/actions/setup
         with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Programma's installeren
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q osmium-tool
-          # rclone: vaste versie van rclone.org, nagekeken met de controlesom. De versie uit Ubuntu (1.60)
-          # kreeg bij R2 voor elke nieuwe tegel een fout 501 en probeerde ze tot 10 keer opnieuw.
-          curl -sSfL -o /tmp/rclone.deb "https://downloads.rclone.org/$RCLONE_DEB_VERSION/rclone-$RCLONE_DEB_VERSION-linux-amd64.deb"
-          echo "$RCLONE_DEB_SHA256  /tmp/rclone.deb" | sha256sum -c -
-          sudo dpkg -i /tmp/rclone.deb
-          osmium --version | head -1
-          rclone version | head -1
-          pip install -q -r requirements.txt
-
+          rclone: "false"
       - name: Test
         run: |
           python3 tests/test_tiles.py
           python3 tests/test_areas.py
           python3 tests/test_water.py
+          python3 tests/test_parts.py
+      - name: Gebieden
+        id: regions
+        run: |
+          regions=$(python3 -c "
+          import json, sys
+          sys.path.insert(0, 'scripts')
+          import parts_common as pc
+          print(json.dumps([r['id'] for r in pc.enabled_regions(pc.load_config('regions.yml'))]))")
+          echo "regions=$regions" >> "$GITHUB_OUTPUT"
+          echo "Gebieden: $regions"
 
-      - name: Gebieden downloaden
-        run: python3 scripts/fetch_regions.py
+  part:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300   # GitHub staat maximaal 360 toe
+    strategy:
+      fail-fast: false
+      # Niet te veel tegelijk downloaden bij Geofabrik.
+      max-parallel: 4
+      matrix:
+        region: ${{ fromJSON(needs.plan.outputs.regions) }}
+    env:
+      REGION: ${{ matrix.region }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
 
-      - name: Tegels maken
-        run: python3 scripts/build_tiles.py --max-gb 8
+      - name: Downloaden bij Geofabrik
+        run: |
+          python3 scripts/fetch_regions.py --only "$REGION"
+          # De omtrek van alle gebieden: om te weten welke tegels randtegels zijn.
+          python3 scripts/fetch_regions.py --polys-only
+
+      - name: Wegtegels maken
+        run: python3 scripts/build_tiles.py --part "$REGION" --max-gb 8
 
       - name: Omgevingsgegevens maken (gemeenten, deelgemeenten, plaatsen)
-        run: python3 scripts/build_areas.py
+        run: python3 scripts/build_areas.py --only "$REGION" --out "parts/$REGION"
 
-      - name: Water maken (waterlopen en watervlakken, aparte laag tegels)
-        run: python3 scripts/build_water.py
+      - name: Water maken (waterlopen en watervlakken)
+        run: python3 scripts/build_water.py --part "$REGION"
 
-      - name: Opladen naar R2
-        if: github.event_name == 'schedule' || inputs.upload
+      - name: Eigen tegels opladen naar R2
+        if: env.UPLOAD == 'true'
         env:
-          RCLONE_CONFIG_R2_TYPE: s3
-          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_R2_ACL: private
-          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
         run: |
-          # Spaties en regeleinden rond de secrets weghalen (komen makkelijk mee bij het plakken).
-          trim() { printf '%s' "$1" | tr -d '[:space:]'; }
-          for v in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
-            test -n "$(trim "${!v}")" || { echo "::error::Secret $v ontbreekt of is leeg"; exit 1; }
-          done
-          export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$(trim "$R2_ACCESS_KEY_ID")"
-          export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$(trim "$R2_SECRET_ACCESS_KEY")"
-          export RCLONE_CONFIG_R2_ENDPOINT="https://$(trim "$R2_ACCOUNT_ID").r2.cloudflarestorage.com"
+          source scripts/r2-env.sh
+          upload_tiles "parts/$REGION/final/14" 14
+          if [ -d "parts/$REGION/final/water/14" ]; then upload_tiles "parts/$REGION/final/water/14" water/14; fi
 
-          # Tegels: alleen gewijzigde opladen (--checksum = MD5 vergelijken), verdwenen tegels wissen.
-          # Alleen onder 14/: andere bestanden in de bucket (bv. test.txt) blijven staan.
-          # application/gzip zonder Content-Encoding: de app pakt de tegel zelf uit.
-          rclone sync out/14 "r2:$BUCKET/14" --checksum --fast-list \
-            --transfers 32 --checkers 32 --low-level-retries 3 \
-            --header-upload "Content-Type: application/gzip" \
-            --header-upload "Cache-Control: public, max-age=3600" \
-            --stats 60s --stats-one-line --stats-log-level NOTICE
-          # Water: aparte laag tegels onder water/14/ (alleen gewijzigde, verdwenen wissen).
-          rclone sync out/water/14 "r2:$BUCKET/water/14" --checksum --fast-list \
-            --transfers 32 --checkers 32 --low-level-retries 3 \
-            --header-upload "Content-Type: application/gzip" \
-            --header-upload "Cache-Control: public, max-age=3600" \
-            --stats 60s --stats-one-line --stats-log-level NOTICE
+      - name: Randtegels doorgeven
+        uses: actions/upload-artifact@v4
+        with:
+          name: part-${{ matrix.region }}
+          path: |
+            parts/${{ matrix.region }}
+            !parts/${{ matrix.region }}/final
+          retention-days: 3
+          compression-level: 1   # de bestanden zijn al gzip
+
+  merge:
+    needs: part
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      - name: Randtegels ophalen
+        uses: actions/download-artifact@v4
+        with:
+          pattern: part-*
+          path: parts
+
+      - name: Randtegels samenvoegen
+        run: python3 scripts/merge_parts.py --max-gb 8
+
+      - name: Opladen naar R2 en verdwenen tegels wissen
+        if: env.UPLOAD == 'true'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          ALLOW_MANY_DELETES: ${{ inputs.allow_many_deletes || false }}
+        run: |
+          source scripts/r2-env.sh
+          upload_tiles out/14 14
+          if [ -d out/water/14 ]; then upload_tiles out/water/14 water/14; fi
+
+          # Verdwenen tegels wissen: wat in R2 staat maar in geen enkel deel meer voorkomt. Nooit meer dan 5%
+          # (tenzij allow_many_deletes): een fout in de lijsten mag niet alle tegels wissen.
+          for layer in 14 water; do
+            dest="14"; [ "$layer" = "water" ] && dest="water/14"
+            rclone lsf -R --files-only --fast-list "r2:$BUCKET/$dest" | sort > "/tmp/present-$layer.txt"
+            sort "out/expected-$layer.txt" > "/tmp/expected-$layer.txt"
+            comm -23 "/tmp/present-$layer.txt" "/tmp/expected-$layer.txt" > "/tmp/delete-$layer.txt"
+            present=$(wc -l < "/tmp/present-$layer.txt"); n=$(wc -l < "/tmp/delete-$layer.txt")
+            echo "$dest: $present in R2, $n te wissen"
+            if [ "$n" -gt 0 ]; then
+              if [ "$ALLOW_MANY_DELETES" != "true" ] && [ $((n * 20)) -gt "$present" ]; then
+                echo "::error::$n van de $present tegels onder $dest zouden gewist worden (meer dan 5%). Niets gewist."
+                exit 1
+              fi
+              rclone delete "r2:$BUCKET/$dest" --files-from "/tmp/delete-$layer.txt" --fast-list
+            fi
+          done
+
           # Omgevingsgegevens per gebied (klein): gemeenten, deelgemeenten, plaatsen.
           rclone sync out/areas "r2:$BUCKET/areas" --checksum --exclude index.json \
             --header-upload "Content-Type: application/gzip" \
@@ -128,7 +192,7 @@ jobs:
           done
 
       - name: Controle via het publieke adres
-        if: github.event_name == 'schedule' || inputs.upload
+        if: env.UPLOAD == 'true'
         run: |
           # Eén echte tegel (de grootste) en regions.json moeten bereikbaar zijn.
           tile=$(python3 -c "import json;print(json.load(open('out/status.json'))['largest_tiles'][0]['tile'])")
@@ -139,7 +203,7 @@ jobs:
           done
 
       - name: status.json terugschrijven
-        if: github.event_name == 'schedule' || inputs.upload
+        if: env.UPLOAD == 'true'
         run: |
           cp out/status.json status.json
           git config user.name "github-actions[bot]"
@@ -155,16 +219,16 @@ jobs:
         run: |
           test -f out/status.json || exit 0
           python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
-          import json
+          import json, os
           s = json.load(open("out/status.json"))
           print("## Tegels")
           print(f"- Gebieden: {', '.join(s['regions'])}")
-          print(f"- Tegels: {s['tiles']} ({s['tiles_complete']} volledig, {s['tiles_empty']} leeg)")
+          print(f"- Tegels: {s['tiles']} ({s['tiles_complete']} volledig, {s['tiles_empty']} leeg, "
+                f"{s['tiles_merged']} samengevoegde randtegels)")
           print(f"- Wegen: {s['ways']}, oversteekknopen: {s['crossing_nodes']}")
           print(f"- Grootte: {s['bytes_total'] / 1e6:.1f} MB, mediaan {s['bytes_median'] / 1000:.1f} kB, "
                 f"grootste {s['bytes_max'] / 1000:.1f} kB")
-          print(f"- Duur van het maken: {s['duration_seconds']} s")
-          import os
+          print(f"- Duur van het maken (langste gebied + samenvoegen): {s['duration_seconds']} s")
           if os.path.exists("out/areas/index.json"):
               print("## Omgevingsgegevens")
               for r in json.load(open("out/areas/index.json"))["regions"]:
@@ -175,5 +239,5 @@ jobs:
               w = json.load(open("out/water/status.json"))
               print("## Water")
               print(f"- {w['tiles']} tegels, {w['bytes_total'] / 1e6:.1f} MB, {w['waterways']} waterlopen, "
-                    f"{w['water']} watervlakken, {w['duration_seconds']} s")
+                    f"{w['water']} watervlakken")
           EOF

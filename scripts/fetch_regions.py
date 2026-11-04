@@ -6,6 +6,7 @@ bij Geofabrik, en controleert het bestand met de MD5-controlesom van Geofabrik.
 Gebruik:
     python3 scripts/fetch_regions.py --regions regions.yml --data data
     python3 scripts/fetch_regions.py --only belgium
+    python3 scripts/fetch_regions.py --polys-only      # alleen de omtrek van alle gebieden (gesplitste run)
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ def main():
     ap.add_argument("--regions", default="regions.yml")
     ap.add_argument("--data", default="data")
     ap.add_argument("--only", nargs="*", help="alleen deze gebieden (id's uit regions.yml)")
+    ap.add_argument("--polys-only", action="store_true", help="alleen de .poly-bestanden (klein), geen .osm.pbf")
     args = ap.parse_args()
 
     with open(args.regions, encoding="utf-8") as f:
@@ -88,6 +90,10 @@ def main():
         pbf = os.path.join(args.data, f"{r['id']}.osm.pbf")
         poly = os.path.join(args.data, f"{r['id']}.poly")
         print(f"{r['name']} ({src})")
+        if args.polys_only:
+            with open(poly, "wb") as f:
+                f.write(retry("omtrek", lambda: get(f"{BASE}/{src}.poly")))
+            continue
 
         expected = retry("controlesom", lambda: get(f"{BASE}/{src}-latest.osm.pbf.md5")).decode().split()[0]
         if os.path.exists(pbf) and md5(pbf) == expected:

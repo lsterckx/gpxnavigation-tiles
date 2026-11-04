@@ -23,6 +23,11 @@ blijft en bij het opladen overgeslagen wordt. De datum van de gegevens staat in 
 
 Gebruik (na fetch_regions.py):
     python3 scripts/build_tiles.py --regions regions.yml --data data --out out
+
+Gesplitste run (GitHub Actions, één job per gebied; zie parts_common.py en merge_parts.py):
+    python3 scripts/build_tiles.py --part belgium --data data --parts parts
+schrijft de eigen tegels naar parts/belgium/final/14/ en de randtegels naar parts/belgium/tiles_border.json.gz.
+Nodig: het .osm.pbf van dat gebied en de .poly van alle gebieden (fetch_regions.py --polys-only).
 """
 
 from __future__ import annotations
@@ -49,6 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tiles_common import (  # noqa: E402
     ZOOM, filter_tags, is_crossing_node, line_tiles, lonlat_to_tile, tile_bounds, tile_path,
 )
+import parts_common as pc  # noqa: E402
 
 FORMAT_VERSION = 1
 
@@ -195,25 +201,34 @@ def area_tiles(shape) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
 
 # ---------- schrijven ----------
 
-def write_tiles(out_dir: str, collector: Collector, touching: set, inside: set) -> list[tuple[str, int, int]]:
-    """Schrijft alle tegels; geeft (pad, bytes, aantal elementen) per tegel terug."""
+def tile_bytes(elements: list[str], complete: bool) -> bytes:
+    """Eén tegel: knopen en wegen al gesorteerd (eerst knopen op id, dan wegen op id), gzip zonder datum."""
+    text = (f'{{"version":{FORMAT_VERSION},"complete":{"true" if complete else "false"},"elements":['
+            + ",".join(elements) + "]}")
+    return gzip.compress(text.encode("utf-8"), compresslevel=9, mtime=0)
+
+
+def cells_to_write(filled: set, touching: set) -> set:
+    """
+    De tegels met wegen of oversteekknopen, plus de lege tegels in de gebieden naast een tegel met wegen.
+    Een lege tegel alleen naast een tegel met wegen: de app vraagt alleen tegels op langs een route of rond
+    je plaats, en die liggen altijd op of naast een tegel met wegen. Zo vallen de honderdduizenden lege
+    tegels op zee binnen de omtrek van Geofabrik weg (Azoren, Canarische Eilanden, Waddenzee).
+    """
+    return filled | (touching & pc.neighbors(filled))
+
+
+def write_cells(out_dir: str, cells, collector: Collector, inside: set) -> list[tuple[str, int, int]]:
+    """Schrijft de tegels `cells` (map 14/ eerst leeg); geeft (pad, bytes, aantal elementen) per tegel terug."""
     tiles_dir = os.path.join(out_dir, str(ZOOM))
     if os.path.isdir(tiles_dir):
         shutil.rmtree(tiles_dir)
-    filled = set(collector.tile_ways) | set(collector.tile_nodes)
-    # Een lege tegel alleen naast een tegel met wegen: de app vraagt alleen tegels op langs een route of rond
-    # je plaats, en die liggen altijd op of naast een tegel met wegen. Zo vallen de honderdduizenden lege
-    # tegels op zee binnen de omtrek van Geofabrik weg (Azoren, Canarische Eilanden, Waddenzee).
-    near = {(x + dx, y + dy) for (x, y) in filled for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
-    all_cells = filled | (touching & near)
     written = []
-    for (x, y) in sorted(all_cells):
+    for (x, y) in sorted(cells):
         node_ids = sorted(set(collector.tile_nodes.get((x, y), ())))
         way_ids = sorted(set(collector.tile_ways.get((x, y), ())))
         elements = [collector.nodes[i] for i in node_ids] + [collector.ways[i] for i in way_ids]
-        complete = "true" if (x, y) in inside else "false"
-        text = f'{{"version":{FORMAT_VERSION},"complete":{complete},"elements":[' + ",".join(elements) + "]}"
-        data = gzip.compress(text.encode("utf-8"), compresslevel=9, mtime=0)
+        data = tile_bytes(elements, (x, y) in inside)
         rel = tile_path(x, y)
         path = os.path.join(out_dir, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -221,6 +236,102 @@ def write_tiles(out_dir: str, collector: Collector, touching: set, inside: set) 
             f.write(data)
         written.append((rel, len(data), len(elements)))
     return written
+
+
+def write_tiles(out_dir: str, collector: Collector, touching: set, inside: set) -> list[tuple[str, int, int]]:
+    """Schrijft alle tegels (één run met alle gebieden)."""
+    filled = set(collector.tile_ways) | set(collector.tile_nodes)
+    return write_cells(out_dir, cells_to_write(filled, touching), collector, inside)
+
+
+def size_stats(written: list[tuple[str, int, int]]) -> dict:
+    sizes = sorted(s for _, s, _ in written)
+    largest = sorted(written, key=lambda t: (-t[1], t[0]))[:10]
+    return {
+        "bytes_total": sum(sizes),
+        "bytes_median": int(statistics.median(sizes)) if sizes else 0,
+        "bytes_p95": sizes[int(len(sizes) * 0.95)] if sizes else 0,
+        "bytes_max": sizes[-1] if sizes else 0,
+        "largest_tiles": [{"tile": p, "bytes": s, "elements": n} for p, s, n in largest],
+    }
+
+
+# ---------- gesplitste run: één gebied ----------
+
+def build_part(args) -> None:
+    """Eén gebied: eigen tegels schrijven, randtegels en de tegelverzamelingen voor merge_parts.py bewaren."""
+    started = time.time()
+    config = pc.load_config(args.regions)
+    regions = pc.enabled_regions(config)
+    ids = [r["id"] for r in regions]
+    if args.part not in ids:
+        sys.exit(f"{args.part} staat niet (aan) in {args.regions}")
+    index = ids.index(args.part)
+    region = regions[index]
+    out = pc.part_dir(args.parts, region["id"])
+    os.makedirs(out, exist_ok=True)
+
+    pbf = os.path.join(args.data, f"{region['id']}.osm.pbf")
+    print(f"{region['name']} ({region['id']}), deel {index + 1} van {len(regions)}")
+    shape = read_poly(os.path.join(args.data, f"{region['id']}.poly"))
+    others = []
+    for r in regions:
+        if r["id"] != region["id"]:
+            poly = os.path.join(args.data, f"{r['id']}.poly")
+            if not os.path.exists(poly):
+                sys.exit(f"  ontbreekt: {poly} (eerst fetch_regions.py --polys-only)")
+            others.append(read_poly(poly))
+    shutil.copyfile(os.path.join(args.data, f"{region['id']}.poly"), os.path.join(out, f"{region['id']}.poly"))
+
+    collector = Collector()
+    collector.apply_file(prefilter(pbf), locations=True, idx="flex_mem")
+    print(f"  {len(collector.ways)} wegen, {len(collector.nodes)} oversteekknopen ({time.time() - started:.0f} s)")
+
+    touching, inside = area_tiles(shape)
+    filled = set(collector.tile_ways) | set(collector.tile_nodes)
+    zone = pc.border_zone(others, pc.border_margin(config))
+    border = pc.cells_in_zone(touching | filled, zone)
+    final = cells_to_write(filled, touching) - border
+    print(f"  {len(final)} eigen tegels, {len(border)} randtegels")
+    written = write_cells(os.path.join(out, "final"), final, collector, inside)
+
+    # Randtegels: per tegel de id's, en de elementen zelf (als JSON-tekst, zoals in de tegel).
+    cells, node_texts, way_texts = {}, {}, {}
+    for cell in sorted(border & filled):
+        node_ids = sorted(set(collector.tile_nodes.get(cell, ())))
+        way_ids = sorted(set(collector.tile_ways.get(cell, ())))
+        cells[pc.cell_key(cell)] = {"n": node_ids, "w": way_ids}
+        for i in node_ids:
+            node_texts[str(i)] = collector.nodes[i]
+        for i in way_ids:
+            way_texts[str(i)] = collector.ways[i]
+    pc.write_json_gz(os.path.join(out, "tiles_border.json.gz"),
+                     {"cells": cells, "nodes": node_texts, "ways": way_texts})
+
+    meta = {
+        "id": region["id"], "name": region["name"], "index": index,
+        "bbox": [round(v, 5) for v in shape.bounds],
+        "osm_timestamp": osm_timestamp(pbf),
+        "touching": pc.cells_to_list(touching),
+        "filled": pc.cells_to_list(filled),
+        "border": pc.cells_to_list(border),
+        "final": [p for p, _, _ in written],
+        "final_sizes": [s for _, s, _ in written],
+        "final_complete": sum(1 for p, _, _ in written if tuple(map(int, p[:-8].split("/")[1:])) in inside),
+        "final_empty": sum(1 for _, _, n in written if n == 0),
+        "final_largest": size_stats(written)["largest_tiles"],
+        "ways": len(collector.ways),
+        "crossing_nodes": len(collector.nodes),
+        "ways_skipped_incomplete": collector.skipped_ways,
+        "duration_seconds": round(time.time() - started),
+    }
+    pc.write_json_gz(os.path.join(out, "tiles_meta.json.gz"), meta)
+    total = sum(meta["final_sizes"])
+    print(f"  eigen tegels samen {total / 1e6:.1f} MB, {meta['duration_seconds']} s")
+    if total > args.max_gb * 1e9:
+        print(f"\nFOUT: de tegels zijn samen {total / 1e9:.2f} GB, meer dan de grens van {args.max_gb} GB.",
+              file=sys.stderr)
+        sys.exit(2)
 
 
 def main():
@@ -231,7 +342,12 @@ def main():
     ap.add_argument("--only", nargs="*", help="alleen deze gebieden (id's uit regions.yml)")
     ap.add_argument("--max-gb", type=float, default=8.0,
                     help="mislukken (exit-code 2) als alle tegels samen groter zijn dan dit")
+    ap.add_argument("--part", help="gesplitste run: alleen dit gebied (id uit regions.yml)")
+    ap.add_argument("--parts", default="parts", help="map voor de delen van een gesplitste run")
     args = ap.parse_args()
+    if args.part:
+        build_part(args)
+        return
 
     started = time.time()
     regions = load_regions(args.regions, args.only)
@@ -263,9 +379,9 @@ def main():
     print("tegels schrijven ...")
     written = write_tiles(args.out, collector, touching, inside)
 
-    sizes = sorted(s for _, s, _ in written)
-    total = sum(sizes)
-    largest = sorted(written, key=lambda t: -t[1])[:10]
+    stats = size_stats(written)
+    total = stats["bytes_total"]
+    largest = sorted(written, key=lambda t: (-t[1], t[0]))[:10]
     generated = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
     status = {
         "generated": generated,
@@ -277,11 +393,7 @@ def main():
         "ways": len(collector.ways),
         "crossing_nodes": len(collector.nodes),
         "ways_skipped_incomplete": collector.skipped_ways,
-        "bytes_total": total,
-        "bytes_median": int(statistics.median(sizes)) if sizes else 0,
-        "bytes_p95": sizes[int(len(sizes) * 0.95)] if sizes else 0,
-        "bytes_max": sizes[-1] if sizes else 0,
-        "largest_tiles": [{"tile": p, "bytes": s, "elements": n} for p, s, n in largest],
+        **stats,
     }
     regions_json = {
         "version": FORMAT_VERSION,

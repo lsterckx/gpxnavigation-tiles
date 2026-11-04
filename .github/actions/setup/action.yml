@@ -1,0 +1,33 @@
+name: Programma's installeren
+description: Python, osmium-tool, rclone (vaste versie, nagekeken met de controlesom) en de Python-pakketten.
+
+inputs:
+  rclone:
+    description: "rclone installeren"
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+        cache: pip
+
+    - name: osmium-tool, rclone en Python-pakketten
+      shell: bash
+      env:
+        WITH_RCLONE: ${{ inputs.rclone }}
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y -q osmium-tool
+        if [ "$WITH_RCLONE" = "true" ]; then
+          # rclone: vaste versie van rclone.org, nagekeken met de controlesom. De versie uit Ubuntu (1.60)
+          # kreeg bij R2 voor elke nieuwe tegel een fout 501 en probeerde ze tot 10 keer opnieuw.
+          curl -sSfL -o /tmp/rclone.deb "https://downloads.rclone.org/$RCLONE_DEB_VERSION/rclone-$RCLONE_DEB_VERSION-linux-amd64.deb"
+          echo "$RCLONE_DEB_SHA256  /tmp/rclone.deb" | sha256sum -c -
+          sudo dpkg -i /tmp/rclone.deb
+          rclone version | head -1
+        fi
+        osmium --version | head -1
+        pip install -q -r requirements.txt

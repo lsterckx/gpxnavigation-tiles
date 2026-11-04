@@ -21,6 +21,11 @@ Formaat (version 1):
 
 Gebruik (na fetch_regions.py):
     python3 scripts/build_water.py --regions regions.yml --data data --out out
+
+Gesplitste run (één job per gebied; zie parts_common.py en merge_parts.py):
+    python3 scripts/build_water.py --part belgium --data data --parts parts
+schrijft de eigen watertegels naar parts/belgium/final/water/14/ en de randtegels naar
+parts/belgium/water_border.json.gz.
 """
 
 from __future__ import annotations
@@ -43,6 +48,7 @@ from shapely.geometry import LineString
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tiles_common import ZOOM, line_tiles, tile_path  # noqa: E402
+import parts_common as pc  # noqa: E402
 
 FORMAT_VERSION = 1
 WATERWAYS = {"river", "stream", "canal", "ditch", "drain", "tidal_channel"}
@@ -165,13 +171,71 @@ class Collector(osmium.SimpleHandler):
         self._add(f"a{key}", element, [[(x, y) for x, y in poly[0]] for poly in polygons])
 
 
+def tile_bytes(elements: list[str]) -> bytes:
+    text = f'{{"version":{FORMAT_VERSION},"elements":[' + ",".join(elements) + "]}"
+    return gzip.compress(text.encode("utf-8"), compresslevel=9, mtime=0)
+
+
+def write_cells(root: str, cells, collector: Collector) -> list[int]:
+    """Schrijft de watertegels `cells` onder root/14/ (eerst leeg); geeft de grootte per tegel terug."""
+    tiles_dir = os.path.join(root, str(ZOOM))
+    if os.path.isdir(tiles_dir):
+        shutil.rmtree(tiles_dir)
+    sizes = []
+    for (x, y) in sorted(cells):
+        data = tile_bytes([collector.elements[k] for k in sorted(collector.tiles[(x, y)])])
+        path = os.path.join(root, tile_path(x, y))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        sizes.append(len(data))
+    return sizes
+
+
+def build_part(args) -> None:
+    """Eén gebied: eigen watertegels schrijven, randtegels bewaren voor merge_parts.py."""
+    from build_tiles import read_poly
+    started = time.time()
+    config = pc.load_config(args.regions)
+    regions = pc.enabled_regions(config)
+    ids = [r["id"] for r in regions]
+    if args.part not in ids:
+        sys.exit(f"{args.part} staat niet (aan) in {args.regions}")
+    region = regions[ids.index(args.part)]
+    out = pc.part_dir(args.parts, region["id"])
+    others = [read_poly(os.path.join(args.data, f"{r['id']}.poly")) for r in regions if r["id"] != region["id"]]
+
+    print(f"{region['name']} ({region['id']})")
+    collector = Collector()
+    collector.apply_file(prefilter(os.path.join(args.data, f"{region['id']}.osm.pbf")), locations=True, idx="flex_mem")
+    filled = set(collector.tiles)
+    border = pc.cells_in_zone(filled, pc.border_zone(others, pc.border_margin(config)))
+    final = filled - border
+    sizes = write_cells(os.path.join(out, "final", "water"), final, collector)
+    cells = {pc.cell_key(c): sorted(collector.tiles[c]) for c in sorted(border)}
+    keys = {k for ks in cells.values() for k in ks}
+    pc.write_json_gz(os.path.join(out, "water_border.json.gz"),
+                     {"cells": cells, "elements": {k: collector.elements[k] for k in sorted(keys)}})
+    meta = {"id": region["id"], "filled": pc.cells_to_list(filled), "border": pc.cells_to_list(border),
+            "final": [tile_path(x, y) for x, y in sorted(final)], "final_sizes": sizes, **collector.counts,
+            "duration_seconds": round(time.time() - started)}
+    pc.write_json_gz(os.path.join(out, "water_meta.json.gz"), meta)
+    print(f"  {len(final)} eigen watertegels ({sum(sizes) / 1e6:.1f} MB), {len(border)} randtegels, "
+          f"{meta['duration_seconds']} s")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--regions", default="regions.yml")
     ap.add_argument("--data", default="data")
     ap.add_argument("--out", default="out")
     ap.add_argument("--only", nargs="*")
+    ap.add_argument("--part", help="gesplitste run: alleen dit gebied (id uit regions.yml)")
+    ap.add_argument("--parts", default="parts")
     args = ap.parse_args()
+    if args.part:
+        build_part(args)
+        return
 
     started = time.time()
     collector = Collector()
@@ -186,19 +250,7 @@ def main():
               f"{collector.counts['water'] - before['water']} watervlakken")
 
     root = os.path.join(args.out, "water")
-    tiles_dir = os.path.join(root, str(ZOOM))
-    if os.path.isdir(tiles_dir):
-        shutil.rmtree(tiles_dir)
-    total = 0
-    for (x, y), keys in sorted(collector.tiles.items()):
-        elements = [collector.elements[k] for k in sorted(keys)]
-        text = f'{{"version":{FORMAT_VERSION},"elements":[' + ",".join(elements) + "]}"
-        data = gzip.compress(text.encode("utf-8"), compresslevel=9, mtime=0)
-        path = os.path.join(root, tile_path(x, y))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as f:
-            f.write(data)
-        total += len(data)
+    total = sum(write_cells(root, set(collector.tiles), collector))
     print(f"\n{len(collector.tiles)} watertegels, samen {total / 1e6:.1f} MB, {time.time() - started:.0f} s")
     with open(os.path.join(root, "status.json"), "w", encoding="utf-8") as f:
         json.dump({"tiles": len(collector.tiles), "bytes_total": total, **collector.counts,

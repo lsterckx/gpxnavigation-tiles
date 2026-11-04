@@ -14,7 +14,7 @@ Gegevens © OpenStreetMap-bijdragers, beschikbaar onder de Open Database License
 2. `scripts/build_tiles.py` maakt tegels op zoomniveau 14 (ongeveer 1,6 × 1,6 km in België):
    `out/14/{x}/{y}.json.gz`, in het JSON-formaat van Overpass. Daarnaast `out/regions.json`
    (welke gebieden, datum van de gegevens) en `out/status.json` (aantallen, grootte, duur).
-3. GitHub Actions (`.github/workflows/tiles.yml`) doet dit elke zondagnacht en laadt de tegels op naar
+3. GitHub Actions (`.github/workflows/tiles.yml`) doet dit de 1e van elke maand (gesplitst per gebied, zie onderaan) en laadt de tegels op naar
    Cloudflare R2, bereikbaar op `https://tiles.data-tech-up.com/14/{x}/{y}.json.gz`. Zie hieronder.
 
 Een tegel heeft `"complete": true` als hij volledig binnen de gebieden ligt. Aan een gebiedsrand
@@ -44,7 +44,7 @@ python3 scripts/compare_overpass.py ~/gpx-test/route.gpx --tiles out
 
 ## Automatisch bijwerken (fase 2)
 
-De werkstroom **Tegels maken en opladen** draait elke zondag om 02:00 UTC, en met de hand via
+De werkstroom **Tegels maken en opladen** draait de 1e van elke maand om 02:00 UTC, en met de hand via
 *Actions → Tegels maken en opladen → Run workflow* (vink *upload* uit om alleen te testen). Hij:
 
 1. draait `tests/test_tiles.py`, downloadt de gebieden en maakt de tegels (mislukt boven 8 GB);
@@ -79,3 +79,22 @@ rivierbeddingen, geen zwembaden, geen naamloze vlakken onder 200 m²). Test: `py
 
 Een regel bijzetten in `regions.yml` (of `enabled: true` zetten). Alle gebieden worden samen
 verwerkt, zodat een tegel op de grens van twee gebieden de wegen van beide bevat.
+
+## Gesplitste run (sinds 04/11/2026)
+
+Eén job voor alle gebieden paste niet meer (6 uur, 14 GB schijf, 16 GB geheugen). De werkstroom draait nu
+**de 1e van elke maand** en bestaat uit drie delen:
+
+1. **plan**: de tests en de lijst van gebieden met `enabled: true`.
+2. **part**: één job per gebied, hoogstens 4 tegelijk. Downloadt het gebied en de omtrek van alle gebieden
+   (`fetch_regions.py --only <id>` en `--polys-only`), maakt de wegtegels (`build_tiles.py --part <id>`), de
+   omgevingsgegevens en het water (`build_water.py --part <id>`). De **eigen tegels** (verder dan
+   `border_margin_degrees` van elk ander gebied) worden meteen opgeladen. De **randtegels** gaan als artefact naar:
+3. **merge**: `merge_parts.py` voegt de randtegels van alle gebieden samen (elementen van beide kanten, `complete`
+   opnieuw berekend met alle gebieden samen), laadt ze op, wist verdwenen tegels (nooit meer dan 5% zonder de keuze
+   *allow_many_deletes*), en schrijft `regions.json`, `status.json` en `areas/index.json`.
+
+`merge_parts.py` controleert dat geen eigen tegel van een gebied geraakt wordt door een ander gebied; anders was de
+marge te klein en stopt het met een fout. `tests/test_parts.py` bouwt twee verzonnen gebieden op beide manieren en
+controleert dat de tegels byte voor byte gelijk zijn. Lokaal kan `build_tiles.py` zonder `--part` nog altijd alles in
+één keer bouwen.

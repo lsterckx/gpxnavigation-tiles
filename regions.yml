@@ -6,8 +6,14 @@
 #   municipality_level  admin_level van een gemeente (standaard 8)     } voor "Omgeving" in de app
 #   section_level       admin_level van een deelgemeente (standaard 9) } (build_areas.py); geen = leeg laten
 #
-# Een gebied toevoegen = hier een regel bijzetten. Alle gebieden samen worden in een keer verwerkt,
-# zodat een tegel op de grens van twee gebieden de wegen van beide bevat.
+# Een gebied toevoegen = hier een regel bijzetten. Elk gebied wordt in een eigen job gebouwd (tegelijk); de tegels
+# op de grens tussen gebieden worden daarna samengevoegd, zodat ze de wegen van beide bevatten
+# (scripts/parts_common.py, scripts/merge_parts.py). Komt een weg in twee gebieden voor, dan telt de versie van het
+# gebied dat hier eerst staat.
+#
+# border_margin_degrees: hoe ver rond de andere gebieden een tegel als randtegel geldt (standaard 0.05, ±4–5 km).
+# merge_parts.py stopt met een fout als dat te weinig is; verhoog het dan.
+border_margin_degrees: 0.05
 
 regions:
   - id: belgium

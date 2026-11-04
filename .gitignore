@@ -15,3 +15,6 @@ overpass*.json
 .venv/
 __pycache__/
 *.pyc
+
+# Delen van een gesplitste run
+parts/
