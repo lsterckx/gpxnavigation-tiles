@@ -217,7 +217,9 @@ def build_part(args) -> None:
     pc.write_json_gz(os.path.join(out, "water_border.json.gz"),
                      {"cells": cells, "elements": {k: collector.elements[k] for k in sorted(keys)}})
     meta = {"id": region["id"], "filled": pc.cells_to_list(filled), "border": pc.cells_to_list(border),
-            "final": [tile_path(x, y) for x, y in sorted(final)], "final_sizes": sizes, **collector.counts,
+            "final": [tile_path(x, y) for x, y in sorted(final)], "final_sizes": sizes,
+            # Alle elementen van dit gebied: merge_parts.py ziet zo of een tegel geraakt door een buur geen verschil maakt.
+            "keys": sorted(collector.elements), **collector.counts,
             "duration_seconds": round(time.time() - started)}
     pc.write_json_gz(os.path.join(out, "water_meta.json.gz"), meta)
     print(f"  {len(final)} eigen watertegels ({sum(sizes) / 1e6:.1f} MB), {len(border)} randtegels, "

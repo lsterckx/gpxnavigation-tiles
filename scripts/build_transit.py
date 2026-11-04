@@ -227,6 +227,8 @@ def build_part(args) -> None:
                      {"cells": cells, "elements": {k: collector.elements[k] for k in sorted(keys)}})
     meta = {"id": region["id"], "filled": pc.cells_to_list(filled), "border": pc.cells_to_list(border),
             "final": [tile_path(x, y) for x, y in sorted(final)], "final_sizes": sizes,
+            # Alle elementen van dit gebied: merge_parts.py ziet zo of een tegel geraakt door een buur geen verschil maakt.
+            "keys": sorted(collector.elements),
             "counts": dict(sorted(collector.counts.items())), "duration_seconds": round(time.time() - started)}
     pc.write_json_gz(os.path.join(out, f"{LAYER}_meta.json.gz"), meta)
     print(f"  {len(final)} eigen tegels ({sum(sizes) / 1e6:.1f} MB), {len(border)} randtegels, "

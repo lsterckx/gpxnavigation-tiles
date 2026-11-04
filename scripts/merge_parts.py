@@ -132,14 +132,15 @@ def roads_harmless(cache: dict):
     return check
 
 
-def layer_harmless(layer: str, cache: dict):
-    """Zelfde voor water en haltes (alleen de tegel zelf telt)."""
+def layer_harmless(layer: str):
+    """Zelfde voor water en haltes (alleen de tegel zelf telt): r heeft alle elementen van s in die tegel zelf ook
+    (de lijst met alle elementen van r staat in zijn meta; een vereenvoudigd watervlak heeft niet al zijn punten)."""
     def check(r: dict, s: dict, c: tuple[int, int]) -> bool:
-        b = s["layers"][layer]["bundle"]
-        keys = b["cells"].get(pc.cell_key(c))
+        keys = s["layers"][layer]["bundle"]["cells"].get(pc.cell_key(c))
         if keys is None:
             return False
-        return has_point_in([b["elements"][k] for k in keys], r["shape_check"], cache)
+        own = r["layers"][layer].setdefault("keyset", set(r["layers"][layer]["meta"].get("keys", ())))
+        return all(k in own for k in keys)
     return check
 
 
@@ -257,7 +258,7 @@ def main():
     for layer in LAYERS:
         for p in parts:
             p["exclusive"] = p["excl_" + layer] = p["layers"][layer]["filled"] - p["layers"][layer]["border"]
-        check_exclusive(layer, parts, lambda p, layer=layer: p["layers"][layer]["filled"], layer_harmless(layer, cache))
+        check_exclusive(layer, parts, lambda p, layer=layer: p["layers"][layer]["filled"], layer_harmless(layer))
 
     for sub in [str(ZOOM), "areas"] + [os.path.join(layer, str(ZOOM)) for layer in LAYERS]:
         if os.path.isdir(os.path.join(args.out, sub)):

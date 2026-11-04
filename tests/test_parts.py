@@ -57,16 +57,21 @@ def write_pbf(path: str, ways: list[tuple[int, list[tuple[float, float]], dict]]
 
 STREET = {"highway": "residential", "name": "Grensstraat"}
 # Gebied A: lengte 4,40–4,62; gebied B: 4,58–4,80 (overlap zoals bij Geofabrik).
+# Groot meer van de grens tot ver in A, met maar een paar punten (vereenvoudigd blijft er geen punt in B over na
+# de marge): staat in beide bestanden.
+LAKE = [(4.44, LAT + 0.02), (4.61, LAT + 0.02), (4.61, LAT + 0.025), (4.44, LAT + 0.025), (4.44, LAT + 0.02)]
 LONG_WAY = [(4.70, LAT - 0.035), (4.60, LAT - 0.035), (4.45, LAT - 0.035)]
 WAYS_A = [
     (100, [(4.45, LAT), (4.50, LAT)], {"highway": "residential", "name": "Weststraat"}),
     (200, [(4.56, LAT), (4.60, LAT), (4.64, LAT)], STREET),                      # over de grens: in A en B
     (400, [(4.55, LAT + 0.01), (4.65, LAT + 0.01)], {"waterway": "stream", "name": "Grensbeek"}),
     (210, LONG_WAY, {"highway": "track", "name": "Lange weg"}),
+    (220, LAKE, {"natural": "water", "name": "Grensmeer"}),
 ]
 WAYS_B = [
     (200, [(4.56, LAT), (4.60, LAT), (4.64, LAT)], STREET),
     (300, [(4.70, LAT), (4.75, LAT)], {"highway": "residential", "name": "Ooststraat"}),
+    (220, LAKE, {"natural": "water", "name": "Grensmeer"}),
     (302, [(4.60, LAT - 0.02), (4.565, LAT - 0.02)], {"highway": "track"}),      # iets buiten de omtrek van B
     # Lange weg over de grens, ver in A (voorbij de marge): staat in beide bestanden, zoals bij Geofabrik.
     (210, LONG_WAY, {"highway": "track", "name": "Lange weg"}),
