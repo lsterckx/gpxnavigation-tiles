@@ -20,11 +20,10 @@ regions:
     name: België
     geofabrik: europe/belgium
     enabled: true
-  # Nederland: voorlopig niet (03/11/2026), om ruimte te houden voor Frankrijk en Oostenrijk.
   - id: netherlands
     name: Nederland
     geofabrik: europe/netherlands
-    enabled: false
+    enabled: true
   - id: luxembourg
     name: Luxemburg
     geofabrik: europe/luxembourg
@@ -71,8 +70,7 @@ regions:
     geofabrik: europe/france/lorraine
     enabled: true
 
-  # Oostenrijk (ongeveer 0,8 GB): klaar om aan te zetten.
   - id: austria
     name: Oostenrijk
     geofabrik: europe/austria
-    enabled: false
+    enabled: true
