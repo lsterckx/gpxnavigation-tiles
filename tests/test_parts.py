@@ -57,22 +57,28 @@ def write_pbf(path: str, ways: list[tuple[int, list[tuple[float, float]], dict]]
 
 STREET = {"highway": "residential", "name": "Grensstraat"}
 # Gebied A: lengte 4,40–4,62; gebied B: 4,58–4,80 (overlap zoals bij Geofabrik).
+LONG_WAY = [(4.70, LAT - 0.035), (4.60, LAT - 0.035), (4.45, LAT - 0.035)]
 WAYS_A = [
     (100, [(4.45, LAT), (4.50, LAT)], {"highway": "residential", "name": "Weststraat"}),
     (200, [(4.56, LAT), (4.60, LAT), (4.64, LAT)], STREET),                      # over de grens: in A en B
     (400, [(4.55, LAT + 0.01), (4.65, LAT + 0.01)], {"waterway": "stream", "name": "Grensbeek"}),
+    (210, LONG_WAY, {"highway": "track", "name": "Lange weg"}),
 ]
 WAYS_B = [
     (200, [(4.56, LAT), (4.60, LAT), (4.64, LAT)], STREET),
     (300, [(4.70, LAT), (4.75, LAT)], {"highway": "residential", "name": "Ooststraat"}),
     (302, [(4.60, LAT - 0.02), (4.565, LAT - 0.02)], {"highway": "track"}),      # iets buiten de omtrek van B
+    # Lange weg over de grens, ver in A (voorbij de marge): staat in beide bestanden, zoals bij Geofabrik.
+    (210, LONG_WAY, {"highway": "track", "name": "Lange weg"}),
     (400, [(4.55, LAT + 0.01), (4.65, LAT + 0.01)], {"waterway": "stream", "name": "Grensbeek"}),
 ]
 # Haltes: een bushalte op de grens (in A en B), een in A, een station in B.
 STOP_BORDER = {(4.595, LAT + 0.005): {"highway": "bus_stop", "name": "Grens", "route_ref": "410"}}
 STOPS_A = {**STOP_BORDER, (4.45, LAT + 0.005): {"highway": "bus_stop", "name": "West"}}
 STOPS_B = {**STOP_BORDER, (4.75, LAT - 0.005): {"railway": "station", "name": "Oost"}}
-FAR = (301, [(4.60, LAT + 0.03), (4.47, LAT + 0.03)], {"highway": "service"})      # ver in A: marge te klein
+# Een weg van B die net buiten A ver naar het westen loopt, zonder knoop in A: A heeft hem niet, maar hij raakt
+# tegels van A. Met een marge van 0 moet merge_parts.py dat weigeren.
+FAR = (301, [(4.70, LAT + 0.04), (4.66, LAT + 0.0505), (4.47, LAT + 0.0505)], {"highway": "service"})
 
 NODE_IDS = {}
 for _, coords, _ in WAYS_A + WAYS_B + [FAR]:
@@ -84,10 +90,15 @@ for c in sorted({**STOPS_A, **STOPS_B}):
 
 def run(*args: str, ok: bool = True) -> int:
     env = dict(os.environ, PATH="/nonexistent")  # zonder osmium-tool
-    r = subprocess.run([sys.executable, *args], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    r = subprocess.run([sys.executable, *args], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if ok and r.returncode != 0:
         raise SystemExit(f"MISLUKT: {' '.join(args)}\n{r.stderr}")
+    LAST_OUTPUT[0] = r.stdout
     return r.returncode
+
+
+LAST_OUTPUT = [""]
+MERGE_OUTPUT = [""]
 
 
 def tree(root: str) -> set[str]:
@@ -132,6 +143,7 @@ def build_all(tmp: str, ways_b, margin: float | None) -> tuple[str, str, int]:
     merged = os.path.join(tmp, "merged")
     code = run(os.path.join(SCRIPTS, "merge_parts.py"), "--regions", regions, "--parts", parts, "--out", merged,
                ok=False)
+    MERGE_OUTPUT[0] = LAST_OUTPUT[0]
     # Samenvoegen zoals in de bucket: eigen tegels van de delen + samengevoegde randtegels.
     combined = os.path.join(tmp, "combined")
     for rid in ("a", "b"):
@@ -149,6 +161,8 @@ def test_same_as_single_run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         single, combined, code = build_all(tmp, WAYS_B, None)
         check(code == 0, "samenvoegen lukt met de standaardmarge")
+        check("geraakt door elementen die beide gebieden hebben" in MERGE_OUTPUT[0],
+              "lange weg over de grens voorbij de marge: aanvaard (beide gebieden hebben hem)")
         a, b = tree(single), tree(combined)
         check(a == b, f"zelfde tegels ({len(a)} wegen-, water- en haltetegels)")
         check(any(f.startswith("transit/") for f in a), "er zijn haltetegels")

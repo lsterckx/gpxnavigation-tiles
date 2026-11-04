@@ -9,8 +9,11 @@ zijn eigen gebied. Daarom splitst elke job zijn tegels in:
   gaan de elementen naar merge_parts.py, dat ze met die van de buren samenvoegt.
 
 merge_parts.py controleert dat de marge groot genoeg was: geen eigen tegel van een gebied mag geraakt worden door
-een ander gebied (zijn omtrek, zijn wegen, of een buurtegel met zijn wegen). Zo is het resultaat byte voor byte
-hetzelfde als wanneer alle gebieden in één keer gebouwd worden (build_tiles.py zonder --part).
+een ander gebied (zijn omtrek, zijn wegen, of een buurtegel met zijn wegen), tenzij het eerste gebied die wegen zelf
+ook heeft: een lange weg over de grens staat volledig in beide Geofabrik-bestanden (Geofabrik neemt een weg op als
+minstens één knoop in het gebied ligt; 04/11/2026: wegen uit Lorraine tot diep in Rheinland-Pfalz). Zo is het
+resultaat byte voor byte hetzelfde als wanneer alle gebieden in één keer gebouwd worden (build_tiles.py zonder
+--part).
 
 Volgorde: komt een element in twee gebieden voor, dan geldt de versie van het gebied dat eerst staat in
 regions.yml (zoals bij één run).

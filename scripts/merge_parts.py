@@ -56,18 +56,52 @@ def find_part(parts: str, region_id: str) -> str:
     sys.exit(f"Deel ontbreekt voor {region_id} in {parts}/ (is die job mislukt?)")
 
 
-def check_exclusive(name: str, parts: list[dict], influence_of) -> None:
-    """Geen eigen tegel van een gebied mag in het invloedsgebied van een ander gebied liggen."""
+def element_points(text: str) -> list[tuple[float, float]]:
+    """De punten (lon, lat) van een element uit een tegel: weg, knoop, waterloop, watervlak of halte."""
+    e = json.loads(text)
+    if "geometry" in e and e["geometry"] and isinstance(e["geometry"][0], dict):
+        return [(g["lon"], g["lat"]) for g in e["geometry"]]          # weg
+    if "geometry" in e:
+        return [(g[0], g[1]) for g in e["geometry"]]                    # waterloop
+    if "polygons" in e:
+        return [(q[0], q[1]) for poly in e["polygons"] for ring in poly for q in ring]   # watervlak
+    return [(e["lon"], e["lat"])]                                       # knoop of halte
+
+
+def has_point_in(texts: list[str], shape, cache: dict) -> bool:
+    """Heeft elk element minstens één punt in `shape`? Dan heeft het gebied van `shape` het element zelf ook
+    (Geofabrik neemt een weg volledig op als minstens één knoop in het gebied ligt)."""
+    for t in texts:
+        key = (id(shape), t)
+        if key not in cache:
+            pts = element_points(t)
+            cache[key] = bool(pts) and bool(shapely.intersects(shape, shapely.points(pts)).any())
+        if not cache[key]:
+            return False
+    return True
+
+
+def check_exclusive(name: str, parts: list[dict], influence_of, harmless) -> None:
+    """
+    Geen eigen tegel van een gebied mag in het invloedsgebied van een ander gebied liggen, tenzij dat geen verschil
+    maakt (`harmless`): de elementen van het andere gebied in en rond die tegel heeft het gebied zelf ook (bv. een
+    lange weg over de grens, die in beide Geofabrik-bestanden volledig staat).
+    """
     owner: dict[tuple[int, int], set[int]] = defaultdict(set)
     for i, p in enumerate(parts):
         for c in influence_of(p):
             owner[c].add(i)
-    problems = []
+    problems, ok = [], 0
     for i, p in enumerate(parts):
         for c in p["exclusive"]:
-            others = owner.get(c, set()) - {i}
-            if others:
-                problems.append((p["id"], c, sorted(parts[j]["id"] for j in others)))
+            others = [j for j in owner.get(c, ()) if j != i]
+            if not others:
+                continue
+            bad = [j for j in others if not harmless(p, parts[j], c)]
+            if bad:
+                problems.append((p["id"], c, sorted(parts[j]["id"] for j in bad)))
+            else:
+                ok += 1
     if problems:
         print(f"FOUT ({name}): {len(problems)} eigen tegels worden ook door een ander gebied geraakt; "
               f"de marge (border_margin_degrees in regions.yml) is te klein. Voorbeelden:", file=sys.stderr)
@@ -76,14 +110,46 @@ def check_exclusive(name: str, parts: list[dict], influence_of) -> None:
             print(f"  {tile_path(x, y)} van {rid}, geraakt door {', '.join(others)} "
                   f"(rond {(la0 + la1) / 2:.4f}, {(lo0 + lo1) / 2:.4f})", file=sys.stderr)
         sys.exit(3)
-    print(f"controle {name}: geen eigen tegel geraakt door een ander gebied")
+    extra = f" ({ok} geraakt door elementen die beide gebieden hebben)" if ok else ""
+    print(f"controle {name}: geen eigen tegel geraakt door een ander gebied{extra}")
+
+
+def roads_harmless(cache: dict):
+    """Eigen tegel c van r, geraakt door s: geen verschil als s c niet raakt met zijn omtrek en r alle elementen van
+    s in c en de buurtegels zelf ook heeft."""
+    def check(r: dict, s: dict, c: tuple[int, int]) -> bool:
+        if c in s["touching"]:
+            return False
+        for k in pc.neighbors({c}) & s["filled"]:
+            entry = s["bundle"]["cells"].get(pc.cell_key(k))
+            if entry is None:          # s gaf die tegel niet door: niet na te gaan
+                return False
+            texts = [s["bundle"]["nodes"][str(i)] for i in entry["n"]] + \
+                    [s["bundle"]["ways"][str(i)] for i in entry["w"]]
+            if not has_point_in(texts, r["shape_check"], cache):
+                return False
+        return True
+    return check
+
+
+def layer_harmless(layer: str, cache: dict):
+    """Zelfde voor water en haltes (alleen de tegel zelf telt)."""
+    def check(r: dict, s: dict, c: tuple[int, int]) -> bool:
+        b = s["layers"][layer]["bundle"]
+        keys = b["cells"].get(pc.cell_key(c))
+        if keys is None:
+            return False
+        return has_point_in([b["elements"][k] for k in keys], r["shape_check"], cache)
+    return check
 
 
 def merge_roads(parts: list[dict], union_shape, out: str) -> list[tuple[str, int, int]]:
     filled_all = set().union(*(p["filled"] for p in parts))
     touching_all = set().union(*(p["touching"] for p in parts))
     near_all = pc.neighbors(filled_all)
-    border_all = set().union(*(p["border"] for p in parts))
+    # Niet de eigen tegels van een gebied (ook niet als een ander gebied ze raakte met elementen die beide hebben):
+    # die heeft dat gebied al volledig gemaakt.
+    border_all = set().union(*(p["border"] for p in parts)) - set().union(*(p["excl_roads"] for p in parts))
     cells = sorted(c for c in border_all if c in filled_all or (c in touching_all and c in near_all))
 
     # Per element de versie van het eerste gebied in regions.yml (parts staat in die volgorde).
@@ -128,7 +194,10 @@ def merge_layer(parts: list[dict], layer: str, out: str) -> list[tuple[str, int]
         for cell, keys in b["cells"].items():
             cell_keys[cell].update(keys)
     written = []
+    exclusive = set().union(*(p["excl_" + layer] for p in parts))
     for cell in sorted(cell_keys, key=pc.key_cell):
+        if pc.key_cell(cell) in exclusive:
+            continue
         x, y = pc.key_cell(cell)
         data = LAYERS[layer]([elements[k] for k in sorted(cell_keys[cell])])
         rel = tile_path(x, y)
@@ -178,12 +247,17 @@ def main():
 
     # Controle: wegen (omtrek, wegen en hun buurtegels) en water (alleen tegels met water).
     for p in parts:
-        p["exclusive"] = (p["touching"] | p["filled"]) - p["border"]
-    check_exclusive("wegen", parts, lambda p: p["touching"] | p["filled_near"])
+        p["exclusive"] = p["excl_roads"] = (p["touching"] | p["filled"]) - p["border"]
+    cache: dict = {}
+    for p in parts:
+        # Iets ruimer dan de omtrek: coördinaten in de tegels zijn afgerond (water op 5 decimalen, ±1 m).
+        p["shape_check"] = p["shape"].buffer(0.00002)
+        shapely.prepare(p["shape_check"])
+    check_exclusive("wegen", parts, lambda p: p["touching"] | p["filled_near"], roads_harmless(cache))
     for layer in LAYERS:
         for p in parts:
-            p["exclusive"] = p["layers"][layer]["filled"] - p["layers"][layer]["border"]
-        check_exclusive(layer, parts, lambda p, layer=layer: p["layers"][layer]["filled"])
+            p["exclusive"] = p["excl_" + layer] = p["layers"][layer]["filled"] - p["layers"][layer]["border"]
+        check_exclusive(layer, parts, lambda p, layer=layer: p["layers"][layer]["filled"], layer_harmless(layer, cache))
 
     for sub in [str(ZOOM), "areas"] + [os.path.join(layer, str(ZOOM)) for layer in LAYERS]:
         if os.path.isdir(os.path.join(args.out, sub)):
