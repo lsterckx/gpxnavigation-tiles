@@ -1,8 +1,9 @@
 {
-  "generated": "2026-11-04T18:06:01+00:00",
-  "duration_seconds": 1558,
+  "generated": "2026-11-04T20:17:01+00:00",
+  "duration_seconds": 1364,
   "regions": [
     "belgium",
+    "netherlands",
     "luxembourg",
     "rheinland-pfalz",
     "koeln-regbez",
@@ -11,18 +12,19 @@
     "nord-pas-de-calais",
     "picardie",
     "champagne-ardenne",
-    "lorraine"
+    "lorraine",
+    "austria"
   ],
-  "tiles": 234832,
-  "tiles_complete": 231704,
-  "tiles_empty": 6582,
-  "tiles_merged": 12284,
-  "ways": 12198884,
-  "crossing_nodes": 1131261,
+  "tiles": 284694,
+  "tiles_complete": 279692,
+  "tiles_empty": 8120,
+  "tiles_merged": 14328,
+  "ways": 17587424,
+  "crossing_nodes": 1310834,
   "ways_skipped_incomplete": 0,
-  "bytes_total": 2531341775,
-  "bytes_median": 7343,
-  "bytes_p95": 30129,
+  "bytes_total": 3249520396,
+  "bytes_median": 7907,
+  "bytes_p95": 31591,
   "bytes_max": 408265,
   "largest_tiles": [
     {
