@@ -95,15 +95,31 @@ def main():
                 f.write(retry("omtrek", lambda: get(f"{BASE}/{src}.poly")))
             continue
 
-        expected = retry("controlesom", lambda: get(f"{BASE}/{src}-latest.osm.pbf.md5")).decode().split()[0]
+        def checksum() -> str:
+            return retry("controlesom", lambda: get(f"{BASE}/{src}-latest.osm.pbf.md5")).decode().split()[0]
+
+        expected = checksum()
         if os.path.exists(pbf) and md5(pbf) == expected:
             print("  .osm.pbf is al de nieuwste versie")
         else:
-            print("  .osm.pbf downloaden")
-            retry("download", lambda: download(f"{BASE}/{src}-latest.osm.pbf", pbf))
-            if md5(pbf) != expected:
-                os.remove(pbf)
-                sys.exit(f"  FOUT: controlesom klopt niet voor {pbf}")
+            # Tot 3 keer: Geofabrik kan tijdens het downloaden een nieuwe versie zetten (04/11/2026, Portugal:
+            # controlesom klopte niet), of de download kan onvolledig zijn.
+            for attempt in range(1, 4):
+                print("  .osm.pbf downloaden" + (f" (poging {attempt}/3)" if attempt > 1 else ""))
+                retry("download", lambda: download(f"{BASE}/{src}-latest.osm.pbf", pbf))
+                got = md5(pbf)
+                if got == expected:
+                    break
+                newer = checksum()
+                if got == newer:
+                    print("  Geofabrik zette intussen een nieuwe versie: die is gedownload")
+                    break
+                print(f"  controlesom klopt niet ({got} in plaats van {expected})")
+                expected = newer
+                if attempt == 3:
+                    os.remove(pbf)
+                    sys.exit(f"  FOUT: controlesom klopt niet voor {pbf}")
+                time.sleep(30)
 
         with open(poly, "wb") as f:
             f.write(retry("omtrek", lambda: get(f"{BASE}/{src}.poly")))
