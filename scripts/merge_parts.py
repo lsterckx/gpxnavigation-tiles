@@ -3,14 +3,15 @@
 Laatste stap van de gesplitste run: voegt de randtegels van alle gebieden samen (zie parts_common.py).
 
 Leest per gebied uit parts/<id>/ (of parts/part-<id>/, zoals GitHub Actions de artefacten neerzet):
-    tiles_meta.json.gz, tiles_border.json.gz, water_meta.json.gz, water_border.json.gz, <id>.poly,
-    areas/<id>.json.gz en areas/index.json
+    tiles_meta.json.gz, tiles_border.json.gz, water_meta.json.gz, water_border.json.gz,
+    transit_meta.json.gz, transit_border.json.gz, <id>.poly, areas/<id>.json.gz en areas/index.json
 en schrijft naar out/:
     14/{x}/{y}.json.gz          de samengevoegde randtegels (wegen)
     water/14/{x}/{y}.json.gz    de samengevoegde randtegels (water)
+    transit/14/{x}/{y}.json.gz  de samengevoegde randtegels (haltes)
     areas/<id>.json.gz, areas/index.json
-    regions.json, status.json, water/status.json
-    expected-14.txt, expected-water.txt   alle tegels die er na deze run moeten zijn (eigen tegels van alle
+    regions.json, status.json, water/status.json, transit/status.json
+    expected-14.txt, expected-water.txt, expected-transit.txt   alle tegels die er na deze run moeten zijn (eigen tegels van alle
                                           gebieden + samengevoegde), om verdwenen tegels in R2 te wissen.
 
 Controle: een eigen tegel van een gebied mag niet geraakt worden door een ander gebied (zijn omtrek, zijn wegen of
@@ -39,7 +40,11 @@ from shapely.ops import unary_union
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import parts_common as pc  # noqa: E402
 from build_tiles import FORMAT_VERSION, read_poly, tile_bytes  # noqa: E402
+from build_transit import tile_bytes as transit_tile_bytes  # noqa: E402
 from build_water import tile_bytes as water_tile_bytes  # noqa: E402
+
+# Lagen met elementen per tegel zonder 'complete' (water, haltes): zelfde manier van samenvoegen.
+LAYERS = {"water": water_tile_bytes, "transit": transit_tile_bytes}
 from tiles_common import ZOOM, tile_bounds, tile_path  # noqa: E402
 
 
@@ -112,21 +117,22 @@ def merge_roads(parts: list[dict], union_shape, out: str) -> list[tuple[str, int
     return written
 
 
-def merge_water(parts: list[dict], out: str) -> list[tuple[str, int]]:
+def merge_layer(parts: list[dict], layer: str, out: str) -> list[tuple[str, int]]:
+    """Randtegels van een laag zonder 'complete' (water, haltes): alle elementen, eerste gebied wint."""
     elements: dict[str, str] = {}
     cell_keys: dict[str, set[str]] = defaultdict(set)
     for p in parts:
-        w = p["water_bundle"]
-        for k, v in w["elements"].items():
+        b = p["layers"][layer]["bundle"]
+        for k, v in b["elements"].items():
             elements.setdefault(k, v)
-        for cell, keys in w["cells"].items():
+        for cell, keys in b["cells"].items():
             cell_keys[cell].update(keys)
     written = []
     for cell in sorted(cell_keys, key=pc.key_cell):
         x, y = pc.key_cell(cell)
-        data = water_tile_bytes([elements[k] for k in sorted(cell_keys[cell])])
+        data = LAYERS[layer]([elements[k] for k in sorted(cell_keys[cell])])
         rel = tile_path(x, y)
-        path = os.path.join(out, "water", rel)
+        path = os.path.join(out, layer, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             f.write(data)
@@ -149,18 +155,23 @@ def main():
     for r in regions:
         d = find_part(args.parts, r["id"])
         meta = pc.read_json_gz(os.path.join(d, "tiles_meta.json.gz"))
-        wmeta = pc.read_json_gz(os.path.join(d, "water_meta.json.gz"))
         p = {
-            "id": r["id"], "dir": d, "meta": meta, "water_meta": wmeta,
+            "id": r["id"], "dir": d, "meta": meta,
             "touching": pc.list_to_cells(meta["touching"]),
             "filled": pc.list_to_cells(meta["filled"]),
             "border": pc.list_to_cells(meta["border"]),
             "bundle": pc.read_json_gz(os.path.join(d, "tiles_border.json.gz")),
-            "wfilled": pc.list_to_cells(wmeta["filled"]),
-            "wborder": pc.list_to_cells(wmeta["border"]),
-            "water_bundle": pc.read_json_gz(os.path.join(d, "water_border.json.gz")),
             "shape": read_poly(os.path.join(d, f"{r['id']}.poly")),
+            "layers": {},
         }
+        for layer in LAYERS:
+            lmeta = pc.read_json_gz(os.path.join(d, f"{layer}_meta.json.gz"))
+            p["layers"][layer] = {
+                "meta": lmeta,
+                "filled": pc.list_to_cells(lmeta["filled"]),
+                "border": pc.list_to_cells(lmeta["border"]),
+                "bundle": pc.read_json_gz(os.path.join(d, f"{layer}_border.json.gz")),
+            }
         p["filled_near"] = pc.neighbors(p["filled"])
         parts.append(p)
         print(f"{r['name']}: {len(meta['final'])} eigen tegels, {len(p['border'])} randtegels")
@@ -169,28 +180,31 @@ def main():
     for p in parts:
         p["exclusive"] = (p["touching"] | p["filled"]) - p["border"]
     check_exclusive("wegen", parts, lambda p: p["touching"] | p["filled_near"])
-    for p in parts:
-        p["exclusive"] = p["wfilled"] - p["wborder"]
-    check_exclusive("water", parts, lambda p: p["wfilled"])
+    for layer in LAYERS:
+        for p in parts:
+            p["exclusive"] = p["layers"][layer]["filled"] - p["layers"][layer]["border"]
+        check_exclusive(layer, parts, lambda p, layer=layer: p["layers"][layer]["filled"])
 
-    for sub in (str(ZOOM), os.path.join("water", str(ZOOM)), "areas"):
+    for sub in [str(ZOOM), "areas"] + [os.path.join(layer, str(ZOOM)) for layer in LAYERS]:
         if os.path.isdir(os.path.join(args.out, sub)):
             shutil.rmtree(os.path.join(args.out, sub))
     os.makedirs(args.out, exist_ok=True)
 
     union_shape = unary_union([p["shape"] for p in parts])
     merged = merge_roads(parts, union_shape, args.out)
-    merged_water = merge_water(parts, args.out)
-    print(f"{len(merged)} samengevoegde randtegels, {len(merged_water)} samengevoegde watertegels")
+    merged_layers = {layer: merge_layer(parts, layer, args.out) for layer in LAYERS}
+    print(f"{len(merged)} samengevoegde randtegels; " +
+          ", ".join(f"{layer}: {len(m)}" for layer, m in merged_layers.items()))
 
     # Lijsten van alle tegels na deze run (paden zoals onder 14/ en water/14/ in de bucket).
     prefix = f"{ZOOM}/"
     expected = sorted({f for p in parts for f in p["meta"]["final"]} | {rel for rel, *_ in merged})
-    expected_water = sorted({f for p in parts for f in p["water_meta"]["final"]} | {rel for rel, _ in merged_water})
     with open(os.path.join(args.out, "expected-14.txt"), "w") as f:
         f.writelines(rel[len(prefix):] + "\n" for rel in expected)
-    with open(os.path.join(args.out, "expected-water.txt"), "w") as f:
-        f.writelines(rel[len(prefix):] + "\n" for rel in expected_water)
+    for layer, merged_layer in merged_layers.items():
+        files = sorted({f for p in parts for f in p["layers"][layer]["meta"]["final"]} | {rel for rel, _ in merged_layer})
+        with open(os.path.join(args.out, f"expected-{layer}.txt"), "w") as f:
+            f.writelines(rel[len(prefix):] + "\n" for rel in files)
 
     # Omgevingsgegevens: de bestanden van de delen, één index.
     areas_out = os.path.join(args.out, "areas")
@@ -245,17 +259,28 @@ def main():
     with open(os.path.join(args.out, "status.json"), "w", encoding="utf-8") as f:
         json.dump(status, f, ensure_ascii=False, indent=2)
 
-    water_sizes = [s for p in parts for s in p["water_meta"]["final_sizes"]] + [s for _, s in merged_water]
-    os.makedirs(os.path.join(args.out, "water"), exist_ok=True)
-    with open(os.path.join(args.out, "water", "status.json"), "w", encoding="utf-8") as f:
-        json.dump({"tiles": len(water_sizes), "bytes_total": sum(water_sizes),
-                   "waterways": sum(p["water_meta"]["waterways"] for p in parts),
-                   "water": sum(p["water_meta"]["water"] for p in parts),
-                   "duration_seconds": max(p["water_meta"]["duration_seconds"] for p in parts)}, f, indent=2)
+    layer_bytes = 0
+    for layer, merged_layer in merged_layers.items():
+        sizes_l = [s for p in parts for s in p["layers"][layer]["meta"]["final_sizes"]] + [s for _, s in merged_layer]
+        layer_bytes += sum(sizes_l)
+        metas = [p["layers"][layer]["meta"] for p in parts]
+        lstatus = {"tiles": len(sizes_l), "bytes_total": sum(sizes_l),
+                   "duration_seconds": max(m["duration_seconds"] for m in metas)}
+        if layer == "water":
+            lstatus.update(waterways=sum(m["waterways"] for m in metas), water=sum(m["water"] for m in metas))
+        else:
+            counts: dict[str, int] = defaultdict(int)
+            for m in metas:
+                for k, v in m["counts"].items():
+                    counts[k] += v
+            lstatus["counts"] = dict(sorted(counts.items()))
+        os.makedirs(os.path.join(args.out, layer), exist_ok=True)
+        with open(os.path.join(args.out, layer, "status.json"), "w", encoding="utf-8") as f:
+            json.dump(lstatus, f, indent=2)
+        print(f"{layer}: {lstatus['tiles']} tegels, samen {lstatus['bytes_total'] / 1e6:.1f} MB")
 
-    print(f"\n{status['tiles']} tegels samen {status['bytes_total'] / 1e6:.1f} MB, "
-          f"{len(water_sizes)} watertegels samen {sum(water_sizes) / 1e6:.1f} MB")
-    total = status["bytes_total"] + sum(water_sizes)
+    print(f"{status['tiles']} wegtegels samen {status['bytes_total'] / 1e6:.1f} MB")
+    total = status["bytes_total"] + layer_bytes
     if total > args.max_gb * 1e9:
         print(f"\nFOUT: de tegels zijn samen {total / 1e9:.2f} GB, meer dan de grens van {args.max_gb} GB.",
               file=sys.stderr)

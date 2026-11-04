@@ -17,3 +17,5 @@ een navigatie-app voor blinde wandelaars. Communicatie, commentaar in code en do
   (AreaInfoStore.swift). Na een wijziging: `python3 tests/test_areas.py` moet slagen.
 - Het formaat van `water/14/x/y.json.gz` (build_water.py) is een afspraak met de app (WaterStore.swift). Na een
   wijziging: `python3 tests/test_water.py` moet slagen.
+- Het formaat van `transit/14/x/y.json.gz` (build_transit.py: bus, tram, metro met ingangen, trein, taxi, veerboot)
+  is een afspraak met de app (TransitStore.swift). Na een wijziging: `python3 tests/test_transit.py` moet slagen.

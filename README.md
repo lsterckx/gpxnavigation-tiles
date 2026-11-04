@@ -98,3 +98,12 @@ Eén job voor alle gebieden paste niet meer (6 uur, 14 GB schijf, 16 GB geheugen
 marge te klein en stopt het met een fout. `tests/test_parts.py` bouwt twee verzonnen gebieden op beide manieren en
 controleert dat de tegels byte voor byte gelijk zijn. Lokaal kan `build_tiles.py` zonder `--part` nog altijd alles in
 één keer bouwen.
+
+## Haltes (openbaar vervoer, taxi, veerboot)
+
+`scripts/build_transit.py` maakt een aparte laag tegels `out/transit/14/{x}/{y}.json.gz` (zelfde raster, alleen
+tegels met haltes): bushaltes (`highway=bus_stop`, perrons met `bus=yes`, busstations), tram (perron en halte op het
+spoor), metro (stations en **ingangen**, `railway=subway_entrance`), trein (stations, haltes, perrons met nummer),
+taxistandplaatsen (`amenity=taxi`) en veerboten (`amenity=ferry_terminal`). Per halte: soort, rol, positie, naam
+met vertalingen, lijnen (`route_ref`), net, vervoerder, nummer, toegankelijkheid. Een perron of station als weg krijgt
+het punt in het midden. Test: `python3 tests/test_transit.py`.

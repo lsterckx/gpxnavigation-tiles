@@ -1,7 +1,8 @@
 # Elke maand de tegels maken en opladen naar Cloudflare R2, in een gesplitste run:
 #
 #   plan   -> welke gebieden (enabled in regions.yml), tests
-#   part   -> één job per gebied, tegelijk: downloaden bij Geofabrik, wegtegels, watertegels, omgevingsgegevens.
+#   part   -> één job per gebied, tegelijk: downloaden bij Geofabrik, wegtegels, watertegels, haltes,
+#             omgevingsgegevens.
 #             De eigen tegels (ver van elk ander gebied) worden meteen opgeladen; de randtegels gaan als artefact
 #             naar merge (zie scripts/parts_common.py).
 #   merge  -> randtegels samenvoegen en opladen (scripts/merge_parts.py), verdwenen tegels wissen, overzichts-
@@ -67,6 +68,7 @@ jobs:
           python3 tests/test_tiles.py
           python3 tests/test_areas.py
           python3 tests/test_water.py
+          python3 tests/test_transit.py
           python3 tests/test_parts.py
       - name: Gebieden
         id: regions
@@ -110,6 +112,9 @@ jobs:
       - name: Water maken (waterlopen en watervlakken)
         run: python3 scripts/build_water.py --part "$REGION"
 
+      - name: Haltes maken (bus, tram, metro, trein, taxi, veerboot)
+        run: python3 scripts/build_transit.py --part "$REGION"
+
       - name: Eigen tegels opladen naar R2
         if: env.UPLOAD == 'true'
         env:
@@ -119,7 +124,9 @@ jobs:
         run: |
           source scripts/r2-env.sh
           upload_tiles "parts/$REGION/final/14" 14
-          if [ -d "parts/$REGION/final/water/14" ]; then upload_tiles "parts/$REGION/final/water/14" water/14; fi
+          for layer in water transit; do
+            if [ -d "parts/$REGION/final/$layer/14" ]; then upload_tiles "parts/$REGION/final/$layer/14" "$layer/14"; fi
+          done
 
       - name: Randtegels doorgeven
         uses: actions/upload-artifact@v4
@@ -158,12 +165,14 @@ jobs:
         run: |
           source scripts/r2-env.sh
           upload_tiles out/14 14
-          if [ -d out/water/14 ]; then upload_tiles out/water/14 water/14; fi
+          for layer in water transit; do
+            if [ -d "out/$layer/14" ]; then upload_tiles "out/$layer/14" "$layer/14"; fi
+          done
 
           # Verdwenen tegels wissen: wat in R2 staat maar in geen enkel deel meer voorkomt. Nooit meer dan 5%
           # (tenzij allow_many_deletes): een fout in de lijsten mag niet alle tegels wissen.
-          for layer in 14 water; do
-            dest="14"; [ "$layer" = "water" ] && dest="water/14"
+          for layer in 14 water transit; do
+            dest="14"; [ "$layer" != "14" ] && dest="$layer/14"
             rclone lsf -R --files-only --fast-list "r2:$BUCKET/$dest" | sort > "/tmp/present-$layer.txt"
             sort "out/expected-$layer.txt" > "/tmp/expected-$layer.txt"
             comm -23 "/tmp/present-$layer.txt" "/tmp/expected-$layer.txt" > "/tmp/delete-$layer.txt"
@@ -240,4 +249,9 @@ jobs:
               print("## Water")
               print(f"- {w['tiles']} tegels, {w['bytes_total'] / 1e6:.1f} MB, {w['waterways']} waterlopen, "
                     f"{w['water']} watervlakken")
+          if os.path.exists("out/transit/status.json"):
+              t = json.load(open("out/transit/status.json"))
+              print("## Haltes")
+              print(f"- {t['tiles']} tegels, {t['bytes_total'] / 1e6:.1f} MB, " +
+                    ", ".join(f"{k}: {v}" for k, v in t["counts"].items()))
           EOF
