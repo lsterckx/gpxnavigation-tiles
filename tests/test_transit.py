@@ -38,6 +38,7 @@ NODES = [
     (10, 0.007, 0.000, {"public_transport": "stop_position", "bus": "yes", "name": "Rijweg"}),
     (11, 0.0030, 0.0005, {}),
     (12, 0.0034, 0.0005, {}),
+    (13, 2.0, 1.0, {"amenity": "ferry_terminal", "name": "Ver weg"}),   # buiten de omtrek (veerdienst)
 ]
 
 
@@ -57,6 +58,11 @@ def main() -> None:
         w.add_way(osmium.osm.mutable.Way(id=100, nodes=[11, 12], tags={"railway": "platform", "ref": "3"}))
         w.add_way(osmium.osm.mutable.Way(id=101, nodes=[11, 12], tags={"highway": "footway"}))
         w.close()
+        with open(os.path.join(data, "test.poly"), "w") as f:
+            f.write("test\n1\n")
+            for dx, dy in [(-0.05, -0.05), (0.05, -0.05), (0.05, 0.05), (-0.05, 0.05), (-0.05, -0.05)]:
+                f.write(f"   {LON + dx:.6f}   {LAT + dy:.6f}\n")
+            f.write("END\nEND\n")
         regions = os.path.join(tmp, "regions.yml")
         with open(regions, "w") as f:
             f.write("regions:\n  - id: test\n    name: Test\n    geofabrik: test/test\n")
@@ -89,6 +95,8 @@ def main() -> None:
         check("n9" not in by, "geen verlaten halte")
         check("n10" not in by, "geen stop_position van een bus")
         check("w101" not in by, "geen gewone weg")
+        far = lonlat_to_tile(LON + 2.0, LAT + 1.0)
+        check(not os.path.exists(os.path.join(out, "transit", tile_path(*far))), "geen halte buiten het gebied")
         status = json.load(open(os.path.join(out, "transit", "status.json")))
         check(status["counts"].get("bus") == 1 and status["counts"].get("subway") == 2, "status.json telt per soort")
     print("\nAlle tests geslaagd.")

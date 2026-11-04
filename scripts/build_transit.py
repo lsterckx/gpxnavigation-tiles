@@ -21,7 +21,9 @@ Uit dezelfde Geofabrik-bestanden als de wegtegels. Elke halte is een punt en sta
 
 Een halte kan dubbel getekend zijn (de plaats waar je wacht én de plaats van het voertuig, bv. tram): beide staan
 erin, met hun role; de app kiest. Een weg (perron, station als vlak) krijgt als positie het punt in het midden.
-Niet: haltes met disused/abandoned, en relaties (stations als multipolygoon; zeldzaam).
+Niet: haltes met disused/abandoned, relaties (stations als multipolygoon; zeldzaam), en haltes buiten de omtrek van
+het gebied: Geofabrik neemt via de relatie van een veerdienst ook verre aanlegplaatsen op (04/11/2026: Rosslare in
+Ierland in Spanje en Nord-Pas-de-Calais, Tenerife in Portugal).
 
 Formaat (version 1):
     {"version":1,"elements":[
@@ -49,6 +51,7 @@ import time
 from collections import defaultdict
 
 import osmium
+import shapely
 import yaml
 from shapely.geometry import LineString, Polygon
 
@@ -132,9 +135,13 @@ class Collector(osmium.SimpleHandler):
         self.elements: dict[str, str] = {}
         self.tiles: dict[tuple[int, int], set[str]] = defaultdict(set)
         self.counts: dict[str, int] = defaultdict(int)
+        # Omtrek van het gebied dat nu gelezen wordt: haltes erbuiten tellen niet.
+        self.shape = None
 
     def _add(self, key: str, tags, lon: float, lat: float) -> None:
         if key in self.elements:
+            return
+        if self.shape is not None and not shapely.contains_xy(self.shape, lon, lat):
             return
         if any(t.k.startswith(SKIP_PREFIXES) for t in tags):
             return
@@ -216,6 +223,8 @@ def build_part(args) -> None:
 
     print(f"{region['name']} ({region['id']})")
     collector = Collector()
+    collector.shape = read_poly(os.path.join(args.data, f"{region['id']}.poly"))
+    shapely.prepare(collector.shape)
     collector.apply_file(prefilter(os.path.join(args.data, f"{region['id']}.osm.pbf")), locations=True, idx="flex_mem")
     filled = set(collector.tiles)
     border = pc.cells_in_zone(filled, pc.border_zone(others, pc.border_margin(config)))
@@ -248,6 +257,7 @@ def main():
         build_part(args)
         return
 
+    from build_tiles import read_poly
     started = time.time()
     collector = Collector()
     for region in load_regions(args.regions, args.only):
@@ -255,6 +265,10 @@ def main():
         if not os.path.exists(pbf):
             sys.exit(f"ontbreekt: {pbf} (eerst fetch_regions.py)")
         print(f"{region['name']} ({region['id']})")
+        poly = os.path.join(args.data, f"{region['id']}.poly")
+        collector.shape = read_poly(poly) if os.path.exists(poly) else None
+        if collector.shape is not None:
+            shapely.prepare(collector.shape)
         collector.apply_file(prefilter(pbf), locations=True, idx="flex_mem")
     root = os.path.join(args.out, LAYER)
     total = sum(write_cells(root, set(collector.tiles), collector))
