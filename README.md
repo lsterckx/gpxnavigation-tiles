@@ -107,3 +107,11 @@ spoor), metro (stations en **ingangen**, `railway=subway_entrance`), trein (stat
 taxistandplaatsen (`amenity=taxi`) en veerboten (`amenity=ferry_terminal`). Per halte: soort, rol, positie, naam
 met vertalingen, lijnen (`route_ref`), net, vervoerder, nummer, toegankelijkheid. Een perron of station als weg krijgt
 het punt in het midden. Test: `python3 tests/test_transit.py`.
+
+## Mail met het resultaat
+
+Op het einde van elke run (ook als ze mislukt) stuurt de job **report** een mail met het resultaat
+(`scripts/report_mail.py`): geslaagd of mislukt, welke jobs mislukten, de samenvatting (gebieden, tegels per laag,
+grootte), hoeveel tegels gewist zijn, en bij een fout in het samenvoegen de laatste regels. Via Gmail; nodige
+secrets: `MAIL_USERNAME` (het Gmail-adres, ook de ontvanger) en `MAIL_PASSWORD` (een app-wachtwoord van Google).
+Zonder die secrets wordt er geen mail verstuurd. Het adres staat nergens in de repository.

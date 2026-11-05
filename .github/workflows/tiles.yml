@@ -7,6 +7,7 @@
 #             naar merge (zie scripts/parts_common.py).
 #   merge  -> randtegels samenvoegen en opladen (scripts/merge_parts.py), verdwenen tegels wissen, overzichts-
 #             bestanden, controle via het publieke adres, status.json terugschrijven.
+#   report -> altijd een mail met het resultaat (scripts/report_mail.py; secrets MAIL_USERNAME en MAIL_PASSWORD).
 #
 # - Een tegel waar niets in veranderde, blijft byte voor byte gelijk en wordt niet opnieuw opgeladen (rclone
 #   vergelijkt de MD5).
@@ -18,7 +19,8 @@
 #   activiteit).
 # - Met de hand starten: Actions -> Tegels maken en opladen -> Run workflow.
 #
-# Nodige secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (zie het plan van aanpak, fase 0).
+# Nodige secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (zie het plan van aanpak, fase 0);
+# voor de mail MAIL_USERNAME en MAIL_PASSWORD.
 
 name: Tegels maken en opladen
 
@@ -153,7 +155,11 @@ jobs:
           path: parts
 
       - name: Randtegels samenvoegen
-        run: python3 scripts/merge_parts.py --max-gb 8
+        shell: bash
+        run: |
+          mkdir -p report
+          # Ook in de mail (report_mail.py): bij een fout de laatste regels.
+          python3 scripts/merge_parts.py --max-gb 8 2>&1 | tee report/merge.log
 
       - name: Opladen naar R2 en verdwenen tegels wissen
         if: env.UPLOAD == 'true'
@@ -162,7 +168,10 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           ALLOW_MANY_DELETES: ${{ inputs.allow_many_deletes || false }}
+        shell: bash
         run: |
+          mkdir -p report
+          exec > >(tee -a report/upload.log) 2>&1
           source scripts/r2-env.sh
           upload_tiles out/14 14
           for layer in water transit; do
@@ -227,7 +236,8 @@ jobs:
         if: always()
         run: |
           test -f out/status.json || exit 0
-          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p report
+          python3 - <<'EOF' > report/summary.md
           import json, os
           s = json.load(open("out/status.json"))
           print("## Tegels")
@@ -255,3 +265,40 @@ jobs:
               print(f"- {t['tiles']} tegels, {t['bytes_total'] / 1e6:.1f} MB, " +
                     ", ".join(f"{k}: {v}" for k, v in t["counts"].items()))
           EOF
+          cat report/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Gegevens voor de mail doorgeven
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report
+          path: report
+          if-no-files-found: ignore
+          retention-days: 3
+
+  # Op het einde altijd een mail met het resultaat (ook als een gebied of het samenvoegen mislukte).
+  # Nodige secrets: MAIL_USERNAME (Gmail-adres, ook de ontvanger) en MAIL_PASSWORD (app-wachtwoord van Google).
+  report:
+    needs: [plan, part, merge]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read   # mislukte jobs opzoeken
+    steps:
+      - uses: actions/checkout@v5
+      - name: Gegevens ophalen
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: report
+          path: report
+      - name: Mail met het resultaat
+        env:
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RESULT_PLAN: ${{ needs.plan.result }}
+          RESULT_PART: ${{ needs.part.result }}
+          RESULT_MERGE: ${{ needs.merge.result }}
+        run: python3 scripts/report_mail.py --dir report
